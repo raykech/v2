@@ -1,0 +1,694 @@
+import tkinter as tk
+from tkinter import ttk, messagebox
+from tkcalendar import DateEntry
+from datetime import datetime
+import uuid
+from core.db import veritabani_baglan
+from core.services import fis_kaydet, fis_guncelle
+from utils.formatters import format_currency, parse_currency, CurrencyFormatter
+from ui.widgets.lookup_widget import LookupWidget
+from ui.dialogs import ac_kart_dialog
+
+class FaturaFormu(tk.Frame):
+    def __init__(self, parent, main_app, list_view, fis_id=None, fis_turu=None, on_close=None):
+        super().__init__(parent, bg="#f5f7fb")
+        self.main_app = main_app
+        self.list_view = list_view
+        self.fis_id = fis_id
+        self.fis_turu = fis_turu
+        self.on_close = on_close
+        self.is_hizmet_faturasi = "Hizmet" in self.fis_turu
+        self.satirlar = {}
+        self.duzenlenen_satir_id = None
+        self.cari_dict, self.stok_dict, self.hizmet_dict, self.kasa_dict, self.banka_dict, self.pos_dict = {}, {}, {}, {}, {}, {}
+        
+        self.create_widgets()
+        self.verileri_yukle()
+        self.ayarla_form_yapisi()
+        
+        # EN SON: Stok/Hizmet lookup widget'ını ayarla (configure_lookup'dan SONRA)
+        self._setup_stok_lookup()
+        
+        if self.fis_id:
+            self.fis_verilerini_yukle()
+
+    def create_widgets(self):
+        # Ana Çerçeveler
+        ust_frame = tk.Frame(self, bg="#f5f7fb")
+        ust_frame.pack(fill="x", padx=10, pady=10)
+        
+        self.liste_frame = tk.LabelFrame(self, text="Fatura Satırları", bg="#f5f7fb", padx=10, pady=10)
+        self.liste_frame.pack(fill="both", expand=True, padx=10)
+
+        alt_buton_frame = tk.Frame(self, bg="#f5f7fb")
+        alt_buton_frame.pack(fill="x", padx=10, pady=10, side="bottom")
+
+        # Üst Frame: Başlık ve Ödeme Bilgileri
+        baslik_frame = tk.LabelFrame(ust_frame, text="Fatura Bilgileri", bg="#f5f7fb", padx=10, pady=10)
+        baslik_frame.pack(side="left", fill="x", expand=True)
+        baslik_frame.columnconfigure(1, weight=1)
+        baslik_frame.columnconfigure(3, weight=1)
+
+        odeme_frame = tk.LabelFrame(ust_frame, text="Ödeme Bilgileri", bg="#f5f7fb", padx=10, pady=10)
+        odeme_frame.pack(side="left", fill="x", padx=(10, 0))
+        odeme_frame.columnconfigure(1, weight=1)
+
+        # Başlık Bilgileri
+        tk.Label(baslik_frame, text="Fatura Türü:", bg="#f5f7fb").grid(row=0, column=0, sticky="w", pady=2)
+        self.ent_fis_turu = ttk.Entry(baslik_frame, font=("Arial", 10, "bold"))
+        self.ent_fis_turu.insert(0, self.fis_turu)
+        self.ent_fis_turu.config(state="readonly")
+        self.ent_fis_turu.grid(row=0, column=1, pady=2, sticky="ew")
+
+        tk.Label(baslik_frame, text="Tarih:", bg="#f5f7fb").grid(row=0, column=2, sticky="w", pady=2, padx=(10,0))
+        self.ent_tarih = DateEntry(baslik_frame, date_pattern="dd.mm.yyyy")
+        self.ent_tarih.grid(row=0, column=3, pady=2, sticky="ew")
+
+        tk.Label(baslik_frame, text="Fatura No:", bg="#f5f7fb").grid(row=1, column=0, sticky="w", pady=2)
+        self.ent_fis_no = tk.Entry(baslik_frame)
+        self.ent_fis_no.grid(row=1, column=1, pady=2, sticky="ew")
+
+        tk.Label(baslik_frame, text="Açıklama:", bg="#f5f7fb").grid(row=1, column=2, sticky="w", pady=2, padx=(10,0))
+        self.ent_aciklama = tk.Entry(baslik_frame)
+        self.ent_aciklama.grid(row=1, column=3, pady=2, sticky="ew")
+
+        self.lbl_cari = tk.Label(baslik_frame, text="Cari Hesap:", bg="#f5f7fb")
+        self.lbl_cari.grid(row=2, column=0, sticky="w", pady=2)
+        self.lookup_cari = LookupWidget(baslik_frame)
+        self.lookup_cari.grid(row=2, column=1, columnspan=3, pady=2, sticky="ew")
+
+        # Ödeme Bilgileri
+        tk.Label(odeme_frame, text="Ödeme Tipi:", bg="#f5f7fb").grid(row=0, column=0, sticky="w", pady=2)
+        self.cmb_odeme_tipi = ttk.Combobox(odeme_frame, state="readonly", values=["Vadeli", "Nakit", "Banka", "POS"])
+        self.cmb_odeme_tipi.grid(row=0, column=1, pady=2, sticky="ew")
+        self.cmb_odeme_tipi.set("Vadeli")
+        self.cmb_odeme_tipi.bind("<<ComboboxSelected>>", self.odeme_tipi_degisti)
+
+        self.lbl_odeme_hesap = tk.Label(odeme_frame, text="Ödeme Hesabı:", bg="#f5f7fb")
+        self.lookup_odeme_hesap = LookupWidget(odeme_frame)
+
+        # --- KASA FORMUNDAN ALINAN SATIR GİRİŞ BÖLÜMÜ ---
+        self.entry_row_frame = tk.Frame(self.liste_frame, bg="#f5f7fb")
+        self.entry_row_frame.pack(fill="x", pady=(0, 10))
+        
+        # Başlıklar
+        self.lbl_hesap_baslik = tk.Label(self.entry_row_frame, text="Stok Adı", anchor='w', font=("Arial", 9, "bold"), bg="#f5f7fb")
+        self.lbl_hesap_baslik.grid(row=0, column=0, sticky='ew')
+        tk.Label(self.entry_row_frame, text="Satır Açıklaması", anchor='w', font=("Arial", 9, "bold"), bg="#f5f7fb").grid(row=0, column=1, sticky='ew')
+        self.lbl_miktar_baslik = tk.Label(self.entry_row_frame, text="Miktar", anchor='w', font=("Arial", 9, "bold"), bg="#f5f7fb")
+        self.lbl_miktar_baslik.grid(row=0, column=2, sticky='ew')
+        self.lbl_birim_fiyat_baslik = tk.Label(self.entry_row_frame, text="Birim Fiyat", anchor='w', font=("Arial", 9, "bold"), bg="#f5f7fb")
+        self.lbl_birim_fiyat_baslik.grid(row=0, column=3, sticky='ew')
+        tk.Label(self.entry_row_frame, text="KDV %", anchor='w', font=("Arial", 9, "bold"), bg="#f5f7fb").grid(row=0, column=4, sticky='ew')
+        tk.Label(self.entry_row_frame, text="Satır Toplamı", anchor='w', font=("Arial", 9, "bold"), bg="#f5f7fb").grid(row=0, column=5, sticky='ew')
+
+        # Giriş satırı widget'ları
+        self.ent_stok = LookupWidget(self.entry_row_frame)
+        self.ent_satir_aciklama = tk.Entry(self.entry_row_frame)
+        self.ent_miktar = tk.Entry(self.entry_row_frame, width=10, justify='right')
+        self.ent_birim_fiyat = tk.Entry(self.entry_row_frame, width=15, justify='right')
+        self.ent_kdv_oran = tk.Entry(self.entry_row_frame, width=8, justify='right')
+        self.lbl_satir_toplam = tk.Label(self.entry_row_frame, text="0,00", width=15, anchor='e', relief="sunken", bg="white", padx=2)
+        self.btn_satir_ekle = tk.Button(self.entry_row_frame, text="+", command=self.satir_ekle, font=("Arial", 9, "bold"), width=3)
+
+        # Giriş satırını başlıkların altına yerleştir
+        self.ent_stok.grid(row=1, column=0, sticky='ew', padx=(0,2), pady=(2,0))
+        self.ent_satir_aciklama.grid(row=1, column=1, sticky='ew', padx=(0,2), pady=(2,0))
+        self.ent_miktar.grid(row=1, column=2, sticky='ew', padx=(0,2), pady=(2,0))
+        self.ent_birim_fiyat.grid(row=1, column=3, sticky='ew', padx=(0,2), pady=(2,0))
+        self.ent_kdv_oran.grid(row=1, column=4, sticky='ew', padx=(0,2), pady=(2,0))
+        self.lbl_satir_toplam.grid(row=1, column=5, sticky='ew', padx=(0,2), pady=(2,0))
+        self.btn_satir_ekle.grid(row=1, column=6, sticky='ew', pady=(2,0), padx=(2,0))
+
+        # Sütun genişliklerini ayarla
+        self.entry_row_frame.grid_columnconfigure(0, weight=4, uniform="group1")
+        self.entry_row_frame.grid_columnconfigure(1, weight=5, uniform="group1")
+        self.entry_row_frame.grid_columnconfigure(2, weight=1, uniform="group1")
+        self.entry_row_frame.grid_columnconfigure(3, weight=2, uniform="group1")
+        self.entry_row_frame.grid_columnconfigure(4, weight=1, uniform="group1")
+        self.entry_row_frame.grid_columnconfigure(5, weight=2, uniform="group1")
+
+        # 1. Formatlayıcıları oluştur
+        self.ent_miktar_formatter = CurrencyFormatter(self.ent_miktar, on_change_callback=self.giris_satiri_hesapla)
+        self.ent_birim_fiyat_formatter = CurrencyFormatter(self.ent_birim_fiyat, on_change_callback=self.giris_satiri_hesapla)
+        CurrencyFormatter(self.ent_kdv_oran, on_change_callback=self.giris_satiri_hesapla)
+
+        # 2. Varsayılan değerleri ekle
+        self.ent_miktar.insert(0, "1,00")
+        self.ent_kdv_oran.insert(0, "20")
+
+        # 3. Odaklanma davranışını en son ekle
+        self._setup_select_on_focus([self.ent_stok.ent_display, self.ent_satir_aciklama, self.ent_miktar, self.ent_birim_fiyat, self.ent_kdv_oran])
+
+        # Başlık Alanları Enter Navigasyonu
+        self.ent_tarih.bind("<Return>", lambda e: self.ent_fis_no.focus_set())
+        self.ent_fis_no.bind("<Return>", lambda e: self.ent_aciklama.focus_set())
+        self.ent_aciklama.bind("<Return>", lambda e: self.lookup_cari.ent_display.focus_set())
+        self.lookup_cari.ent_display.bind("<Return>", lambda e: self.ent_stok.ent_display.focus_set())
+
+        # Enter ile ilerleme
+        self.ent_stok.ent_display.bind("<Return>", lambda e: self.ent_satir_aciklama.focus_set())
+        self.ent_satir_aciklama.bind("<Return>", lambda e: self.ent_miktar.focus_set())
+        self.ent_miktar.bind("<Return>", lambda e: self.ent_birim_fiyat.focus_set())
+        self.ent_birim_fiyat.bind("<Return>", lambda e: self.ent_kdv_oran.focus_set())
+        self.ent_kdv_oran.bind("<Return>", lambda e: self.satir_ekle())
+
+        # Satır Listesi
+        self.tree = ttk.Treeview(self.liste_frame, columns=("stok_adi", "aciklama", "miktar", "birim", "birim_fiyat", "kdv_tutar", "toplam_tutar", "sil"), show="headings")
+        self.tree.heading("stok_adi", text="Stok Adı")
+        self.tree.heading("aciklama", text="Açıklama")
+        self.tree.heading("miktar", text="Miktar", anchor="e")
+        self.tree.heading("birim", text="Birim")
+        self.tree.heading("birim_fiyat", text="Birim Fiyat", anchor="e")
+        self.tree.heading("kdv_tutar", text="KDV Tutarı", anchor="e")
+        self.tree.heading("toplam_tutar", text="Toplam Tutar", anchor="e")
+        self.tree.heading("sil", text="", anchor="center")
+        
+        vsb = ttk.Scrollbar(self.liste_frame, orient="vertical", command=self.tree.yview)
+        vsb.pack(side='right', fill='y')
+        self.tree.configure(yscrollcommand=vsb.set)
+        self.tree.pack(fill="both", expand=True)
+
+        self.tree.bind("<Double-1>", self.satir_duzenle_icin_yukle)
+        self.tree.bind("<ButtonRelease-1>", self.on_tree_click)
+
+        def _sync_widths(event=None):
+            column_map = {"stok_adi": 0, "aciklama": 1, "miktar": 2, "birim_fiyat": 3, "toplam_tutar": 5}
+            for col_name, i in column_map.items():
+                try:
+                    width = self.entry_row_frame.grid_bbox(i, 1)[2]
+                    anchor = "e" if col_name not in ["stok_adi", "aciklama"] else "w"
+                    self.tree.column(col_name, width=width, anchor=anchor)
+                except (TypeError, IndexError): pass
+            self.tree.column("aciklama", anchor="w")
+            self.tree.column("birim", width=60, anchor="center", stretch=False)
+            self.tree.column("kdv_tutar", width=100, anchor="e", stretch=False)
+            self.tree.column("sil", width=30, anchor="center", stretch=False)
+        
+        self.entry_row_frame.bind("<Configure>", _sync_widths)
+        self.after(100, _sync_widths)
+
+        # Toplamlar Alanı
+        toplamlar_frame = tk.Frame(self.liste_frame, bg="#e9ecef")
+        toplamlar_frame.pack(fill="x", pady=(5,0))
+        toplamlar_frame.grid_columnconfigure(1, weight=1)
+
+        self.lbl_ara_toplam = self.create_toplam_etiketi(toplamlar_frame, "Ara Toplam:", 0, 2)
+        self.lbl_kdv_toplam = self.create_toplam_etiketi(toplamlar_frame, "Toplam KDV:", 1, 2)
+        self.lbl_genel_toplam = self.create_toplam_etiketi(toplamlar_frame, "Genel Toplam:", 2, 2, True)
+
+        # Alt Butonlar
+        tk.Button(alt_buton_frame, text="Kaydet", command=self.kaydet, bg="#198754", fg="white", font=("Arial", 10, "bold"), width=15, height=2).pack(side="right", padx=(10, 0))
+        tk.Button(alt_buton_frame, text="Kapat", command=self.kapat, bg="#6c757d", fg="white", font=("Arial", 10, "bold"), width=15, height=2).pack(side="right")
+
+    def create_toplam_etiketi(self, parent, text, row, col, is_bold=False):
+        font = ("Arial", 10, "bold") if is_bold else ("Arial", 9)
+        tk.Label(parent, text=text, font=font, bg="#e9ecef").grid(row=row, column=col, sticky="e", padx=5)
+        lbl = tk.Label(parent, text="0,00 TL", font=font, bg="#e9ecef", width=15, anchor="e")
+        lbl.grid(row=row, column=col+1, sticky="e")
+        return lbl
+
+    def _setup_stok_lookup(self):
+        """Stok/Hizmet lookup widget'ına KDV güncelleme özelliği ekler."""
+        
+        # StringVar kullanarak ent_display'i izle
+        self._stok_var = tk.StringVar()
+        self._stok_var.trace('w', self._on_stok_var_change)
+        self.ent_stok.ent_display.config(textvariable=self._stok_var)
+        
+        # Set metodunu patch'le
+        original_set = self.ent_stok.set
+        
+        def new_set(value):
+            original_set(value)
+            self._stok_var.set(self.ent_stok.get_value() or '')
+            self.after(50, self._force_kdv_update)
+            if self.ent_stok.get_value():
+                self.ent_satir_aciklama.focus_set()
+        
+        self.ent_stok.set = new_set
+        
+        # Tüm olayları yakala
+        self.ent_stok.ent_display.bind("<FocusOut>", lambda e: self.after(50, self._force_kdv_update), add='+')
+        self.ent_stok.ent_display.bind("<KeyRelease>", self._on_stok_key_release, add='+')
+        
+        # Seçim butonuna tıklandığında
+        if hasattr(self.ent_stok, 'btn_select'):
+            self.ent_stok.btn_select.bind("<Button-1>", lambda e: self.after(300, self._force_kdv_update), add='+')
+    
+    def _on_stok_var_change(self, *args):
+        """StringVar değiştiğinde KDV'yi güncelle."""
+        self.after(50, self._force_kdv_update)
+    
+    def _on_stok_key_release(self, event):
+        """Tuş bırakıldığında KDV'yi güncelle."""
+        if event.keysym in ['Return', 'Tab', 'Down', 'Up']:
+            self.after(50, self._force_kdv_update)
+
+    def _force_kdv_update(self):
+        """KDV güncellemesini zorla yapar."""
+        self._on_hesap_select()
+        # Eğer bir stok/hizmet seçiliyse, satır açıklamasına odaklan
+        if self.ent_stok.get_value():
+            self.ent_satir_aciklama.focus_set()
+
+    def _setup_select_on_focus(self, widgets):
+        """
+        Verilen widget listesine, odaklanıldığında ve tıklandığında tüm metni seçme davranışını ekler.
+        """
+        def _select_all(event):
+            widget = event.widget
+            self.after(10, lambda: widget.select_range(0, 'end'))
+            self.after(10, lambda: widget.icursor('end'))
+
+        def _on_click(event):
+            widget = event.widget
+            self.after(10, lambda: widget.select_range(0, 'end'))
+
+        for widget in widgets:
+            widget.bind("<FocusIn>", _select_all, add='+')
+            widget.bind("<Button-1>", _on_click, add='+')
+
+    def _on_hesap_select(self, event=None):
+        """Seçilen stok/hizmet kartına göre KDV oranını otomatik doldurur."""
+        try:
+            hesap_adi = self.ent_stok.get_value()
+            hesap_id = self.ent_stok.get()
+            
+            if not hesap_adi and not hesap_id:
+                return
+
+            kdv_oran = 20  # Varsayılan
+            hesap_bilgisi = None
+            
+            # 1. Önce ID ile dene
+            if hesap_id:
+                if self.is_hizmet_faturasi:
+                    for key, value in self.hizmet_dict.items():
+                        if value.get('id') == hesap_id:
+                            hesap_bilgisi = value
+                            break
+                else:
+                    for key, value in self.stok_dict.items():
+                        if value.get('id') == hesap_id:
+                            hesap_bilgisi = value
+                            break
+            
+            # 2. ID ile bulunamazsa, ad ile dene
+            if not hesap_bilgisi and hesap_adi:
+                temiz_adi = hesap_adi
+                if '] ' in hesap_adi:
+                    temiz_adi = hesap_adi.split('] ', 1)[1]
+                
+                if self.is_hizmet_faturasi:
+                    for key, value in self.hizmet_dict.items():
+                        key_adi = key.split('] ', 1)[1] if '] ' in key else key
+                        if key_adi == temiz_adi or key == hesap_adi:
+                            hesap_bilgisi = value
+                            break
+                else:
+                    for key, value in self.stok_dict.items():
+                        if key == temiz_adi or key == hesap_adi:
+                            hesap_bilgisi = value
+                            break
+
+            if hesap_bilgisi:
+                kdv_oran_db = hesap_bilgisi.get('kdv_oran')
+                if kdv_oran_db is not None:
+                    kdv_oran = kdv_oran_db
+
+            # KDV alanını güncelle
+            self.ent_kdv_oran.delete(0, tk.END)
+            self.ent_kdv_oran.insert(0, f"{kdv_oran:g}")
+            self.giris_satiri_hesapla()
+
+        except Exception as e:
+            print(f"_on_hesap_select hatası: {e}")
+
+    def ayarla_form_yapisi(self):
+        if "Satış Faturası" in self.fis_turu:
+            self.lbl_cari.config(text="Müşteri:")
+        elif "Alış Faturası" in self.fis_turu:
+            self.lbl_cari.config(text="Tedarikçi:")
+        elif "Satış İade" in self.fis_turu:
+            self.lbl_cari.config(text="Müşteri (İade):")
+        elif "Alış İade" in self.fis_turu:
+            self.lbl_cari.config(text="Tedarikçi (İade):")
+        elif "Hizmet Satış" in self.fis_turu:
+            self.lbl_cari.config(text="Müşteri:")
+        elif "Hizmet Alış" in self.fis_turu:
+            self.lbl_cari.config(text="Tedarikçi:")
+
+        if self.is_hizmet_faturasi:
+            self.lbl_hesap_baslik.config(text="Hizmet/Masraf Adı")
+            self.tree.heading("stok_adi", text="Hizmet/Masraf Adı")
+            self.lbl_miktar_baslik.grid_forget()
+            self.ent_miktar.grid_forget()
+            self.tree.column("miktar", width=0, stretch=False)
+            self.tree.column("birim", width=0, stretch=False)
+            is_gelir = "Satış" in self.fis_turu
+            hizmet_filtreli = {k: v['id'] for k, v in self.hizmet_dict.items() if (is_gelir and v['tur'] == 'Gelir') or (not is_gelir and v['tur'] == 'Gider')}
+            self.ent_stok.configure_lookup(title="Hizmet/Masraf Seç", data_dict=hizmet_filtreli, on_new=lambda: self.yeni_kart_ekle("hizmet_kartlari", "Gelir" if is_gelir else "Gider"))
+        else:
+            self.lbl_hesap_baslik.config(text="Stok Adı")
+            self.tree.heading("stok_adi", text="Stok Adı")
+            self.lbl_miktar_baslik.grid()
+            self.ent_miktar.grid()
+            self.tree.column("miktar", width=80, stretch=False)
+            self.tree.column("birim", width=60, stretch=False)
+            self.ent_stok.configure_lookup(title="Stok Seç", data_dict={k: v['id'] for k, v in self.stok_dict.items()}, on_new=lambda: self.yeni_kart_ekle("stoklar"))
+
+    def verileri_yukle(self):
+        conn = veritabani_baglan()
+        cursor = conn.cursor()
+        firma_id = self.main_app.aktif_firma_id
+        
+        cursor.execute("SELECT id, unvan FROM cariler WHERE durum=1 AND firma_id=?", (firma_id,))
+        self.cari_dict = {row[1]: row[0] for row in cursor.fetchall()}
+        self.lookup_cari.configure_lookup(title="Cari Hesap Seç", data_dict=self.cari_dict, on_new=lambda: self.yeni_kart_ekle("cariler"))
+
+        cursor.execute("SELECT id, stok_adi, birim, kdv_oran FROM stoklar WHERE durum=1 AND firma_id=?", (firma_id,))
+        self.stok_dict = {row[1]: {'id': row[0], 'birim': row[2], 'kdv_oran': row[3]} for row in cursor.fetchall()}
+
+        cursor.execute("SELECT id, kart_adi, tur, kdv_oran FROM hizmet_kartlari WHERE durum=1 AND firma_id=?", (firma_id,))
+        self.hizmet_dict = {f"[{row[2]}] {row[1]}": {'id': row[0], 'tur': row[2], 'kdv_oran': row[3]} for row in cursor.fetchall()}
+
+        cursor.execute("SELECT id, kasa_adi FROM kasalar WHERE durum=1 AND firma_id=?", (firma_id,))
+        self.kasa_dict = {row[1]: row[0] for row in cursor.fetchall()}
+        cursor.execute("SELECT id, hesap_adi FROM banka_hesaplari WHERE durum=1 AND hesap_turu='Vadesiz' AND firma_id=?", (firma_id,))
+        self.banka_dict = {row[1]: row[0] for row in cursor.fetchall()}
+        cursor.execute("SELECT id, hesap_adi FROM banka_hesaplari WHERE durum=1 AND hesap_turu='POS' AND firma_id=?", (firma_id,))
+        self.pos_dict = {row[1]: row[0] for row in cursor.fetchall()}
+        
+        conn.close()
+        self.odeme_tipi_degisti()
+
+    def yeni_kart_ekle(self, tablo_adi, kart_turu=None):
+        yeni_kart = ac_kart_dialog(self, tablo_adi, firma_id=self.main_app.aktif_firma_id, kart_turu=kart_turu)
+        if yeni_kart: 
+            self.verileri_yukle()
+            # Yeni kart eklendikten sonra lookup'u tekrar ayarla
+            self._setup_stok_lookup()
+        return yeni_kart
+
+    def odeme_tipi_degisti(self, event=None):
+        tip = self.cmb_odeme_tipi.get()
+        if tip == "Vadeli":
+            self.lbl_odeme_hesap.grid_remove()
+            self.lookup_odeme_hesap.grid_remove()
+            self.lookup_cari.enable()
+            self.lbl_cari.config(state="normal")
+        else:
+            self.lookup_cari.clear()
+            self.lookup_cari.disable()
+            self.lbl_cari.config(state="disabled")
+            self.lbl_odeme_hesap.grid(row=1, column=0, sticky="w", pady=2)
+            self.lookup_odeme_hesap.grid(row=1, column=1, pady=2, sticky="ew")
+            if tip == "Nakit":
+                self.lbl_odeme_hesap.config(text="Kasa Hesabı:")
+                self.lookup_odeme_hesap.configure_lookup(title="Kasa Seç", data_dict=self.kasa_dict, on_new=lambda: self.yeni_kart_ekle("kasalar"))
+            elif tip == "Banka":
+                self.lbl_odeme_hesap.config(text="Banka Hesabı:")
+                self.lookup_odeme_hesap.configure_lookup(title="Banka Hesabı Seç", data_dict=self.banka_dict, on_new=lambda: self.yeni_kart_ekle("banka_hesaplari"))
+            elif tip == "POS":
+                self.lbl_odeme_hesap.config(text="POS Hesabı:")
+                self.lookup_odeme_hesap.configure_lookup(title="POS Hesabı Seç", data_dict=self.pos_dict, on_new=lambda: self.yeni_kart_ekle("banka_hesaplari"))
+
+    def giris_satiri_hesapla(self, event=None):
+        try:
+            miktar = parse_currency(self.ent_miktar.get())
+            birim_fiyat = parse_currency(self.ent_birim_fiyat.get())
+            kdv_oran = parse_currency(self.ent_kdv_oran.get())
+            ara_toplam = miktar * birim_fiyat
+            kdv_tutar = ara_toplam * kdv_oran / 100
+            toplam = ara_toplam + kdv_tutar
+            self.lbl_satir_toplam.config(text=format_currency(toplam).replace(" TL", ""))
+        except (ValueError, TypeError):
+            self.lbl_satir_toplam.config(text="0,00")
+
+    def satir_ekle(self):
+        stok_adi = self.ent_stok.get_value()
+        if not stok_adi: 
+            messagebox.showwarning("Uyarı", f"Lütfen bir {'hizmet' if self.is_hizmet_faturasi else 'stok'} seçin.", parent=self)
+            return
+        
+        try:
+            miktar = 1.0 if self.is_hizmet_faturasi else parse_currency(self.ent_miktar.get())
+            birim_fiyat = parse_currency(self.ent_birim_fiyat.get())
+            kdv_oran = int(parse_currency(self.ent_kdv_oran.get()))
+            if miktar <= 0: raise ValueError("Miktar pozitif olmalı")
+        except (ValueError, TypeError):
+            messagebox.showwarning("Uyarı", "Lütfen geçerli miktar, birim fiyat ve KDV oranı girin.", parent=self)
+            return
+        
+        hesap_id = self.ent_stok.get()
+        hesap_adi = self.ent_stok.get_value()
+        aciklama = self.ent_satir_aciklama.get().strip()
+        birim = ""
+        if not self.is_hizmet_faturasi:
+            birim = self.stok_dict[hesap_adi]['birim']
+
+        ara_toplam = miktar * birim_fiyat
+        kdv_tutar = ara_toplam * kdv_oran / 100
+        toplam_tutar = ara_toplam + kdv_tutar
+
+        satir_verisi = {
+            'hesap_turu': 'Hizmet' if self.is_hizmet_faturasi else 'Stok',
+            'hesap_id': hesap_id, 'stok_adi': hesap_adi, 'aciklama': aciklama,
+            'miktar': miktar, 'birim': birim, 'birim_fiyat': birim_fiyat,
+            'kdv_oran': kdv_oran, 'kdv_tutar': kdv_tutar, 'toplam_tutar': toplam_tutar
+        }
+
+        # İade faturaları için borç/alacak mantığını tersine çevir
+        if "Satış Faturası" in self.fis_turu or "Alış İade Faturası" in self.fis_turu:
+            satir_verisi['borc'] = 0
+            satir_verisi['alacak'] = toplam_tutar
+        else:
+            satir_verisi['borc'] = toplam_tutar
+            satir_verisi['alacak'] = 0
+
+        if not satir_verisi['aciklama']: 
+            satir_verisi['aciklama'] = f"{hesap_adi} - {self.fis_turu}"
+
+        if self.duzenlenen_satir_id:
+            self.satirlar[self.duzenlenen_satir_id] = satir_verisi
+            self.tree.item(self.duzenlenen_satir_id, values=(
+                hesap_adi, aciklama, f"{miktar:,.2f}".replace(",", "X").replace(".", ",").replace("X", "."), birim,
+                format_currency(birim_fiyat), format_currency(kdv_tutar), format_currency(toplam_tutar), "❌"
+            ))
+            self.duzenlenen_satir_id = None
+            self.btn_satir_ekle.config(text="+")
+        else:
+            satir_id = str(uuid.uuid4())
+            self.satirlar[satir_id] = satir_verisi
+            self.tree.insert("", "end", iid=satir_id, values=(
+                hesap_adi, aciklama, f"{miktar:,.2f}".replace(",", "X").replace(".", ",").replace("X", "."), birim,
+                format_currency(birim_fiyat), format_currency(kdv_tutar), format_currency(toplam_tutar), "❌"
+            ))
+
+        self.giris_satirini_temizle()
+        self.guncelle_toplamlari()
+
+    def satir_duzenle_icin_yukle(self, event):
+        selected_item = self.tree.focus()
+        if not selected_item: return
+        
+        self.duzenlenen_satir_id = selected_item
+        satir_verisi = self.satirlar[selected_item]
+
+        self.ent_stok.set(satir_verisi['hesap_id'])
+        self.ent_satir_aciklama.delete(0, tk.END)
+        self.ent_satir_aciklama.insert(0, satir_verisi.get('aciklama', ''))
+        if not self.is_hizmet_faturasi:
+            self.ent_miktar_formatter.set_value(satir_verisi['miktar'])
+        self.ent_birim_fiyat_formatter.set_value(satir_verisi['birim_fiyat'])
+        self.ent_kdv_oran.delete(0, tk.END)
+        self.ent_kdv_oran.insert(0, str(satir_verisi['kdv_oran']))
+        self.giris_satiri_hesapla()
+        self.btn_satir_ekle.config(text="✔")
+        self.ent_stok.ent_display.focus_set()
+
+    def on_tree_click(self, event):
+        region = self.tree.identify("region", event.x, event.y)
+        if region == "cell":
+            column = self.tree.identify_column(event.x)
+            if column == "#8":
+                selected_item = self.tree.focus()
+                if selected_item: self.satir_sil(selected_item)
+
+    def satir_sil(self, satir_id):
+        if satir_id in self.satirlar:
+            del self.satirlar[satir_id]
+            self.tree.delete(satir_id)
+            self.guncelle_toplamlari()
+
+    def giris_satirini_temizle(self):
+        self.ent_stok.clear()
+        self.ent_satir_aciklama.delete(0, tk.END)
+        self.ent_miktar.delete(0, tk.END)
+        self.ent_miktar.insert(0, "1,00")
+        self.ent_birim_fiyat.delete(0, tk.END)
+        self.ent_kdv_oran.delete(0, tk.END)
+        self.ent_kdv_oran.insert(0, "20")
+        self.giris_satiri_hesapla()
+        self.ent_stok.ent_display.focus_set()
+        self.duzenlenen_satir_id = None
+        self.btn_satir_ekle.config(text="+")
+
+    def guncelle_toplamlari(self):
+        ara_toplam = sum(s['miktar'] * s['birim_fiyat'] for s in self.satirlar.values())
+        kdv_toplam = sum(s['kdv_tutar'] for s in self.satirlar.values())
+        genel_toplam = ara_toplam + kdv_toplam
+        self.lbl_ara_toplam.config(text=format_currency(ara_toplam))
+        self.lbl_kdv_toplam.config(text=format_currency(kdv_toplam))
+        self.lbl_genel_toplam.config(text=format_currency(genel_toplam))
+
+    def kaydet(self):
+        cari_id = self.lookup_cari.get()
+        odeme_tipi = self.cmb_odeme_tipi.get()
+
+        if odeme_tipi == "Vadeli" and not cari_id: 
+            messagebox.showwarning("Uyarı", "Vadeli işlem için lütfen bir cari hesap seçin.", parent=self)
+            return
+        if not self.satirlar: 
+            messagebox.showwarning("Uyarı", "Lütfen faturaya en az bir satır ekleyin.", parent=self)
+            return
+
+        genel_toplam = sum(s['toplam_tutar'] for s in self.satirlar.values())
+        
+        fis_data = {
+            'tarih': self.ent_tarih.get_date().strftime("%Y-%m-%d"),
+            'fis_turu': self.fis_turu,
+            'fis_no': self.ent_fis_no.get().strip(),
+            'aciklama': self.ent_aciklama.get().strip(),
+            'cari_id': cari_id,
+            'toplam_tutar': genel_toplam,
+            'firma_id': self.main_app.aktif_firma_id,
+            'yil': self.main_app.aktif_yil
+        }
+
+        pesin_odeme_data = None
+        if odeme_tipi != "Vadeli":
+            odeme_hesap_id = self.lookup_odeme_hesap.get()
+            if not odeme_hesap_id: 
+                messagebox.showwarning("Uyarı", f"Lütfen bir {odeme_tipi} hesabı seçin.", parent=self)
+                return
+            
+            odeme_hesap_turu_map = {"Nakit": "Kasa", "Banka": "Banka", "POS": "Banka"}
+            odeme_hesap_turu = odeme_hesap_turu_map[odeme_tipi]
+            
+            is_tahsilat = "Satış Faturası" in self.fis_turu or "Alış İade Faturası" in self.fis_turu
+            odeme_fis_turu = f"Fatura Peşin Tahsilat ({odeme_tipi})" if is_tahsilat else f"Fatura Peşin Ödeme ({odeme_tipi})"
+
+            pesin_odeme_data = {
+                'tarih': fis_data['tarih'], 'fis_turu': odeme_fis_turu, 'toplam_tutar': genel_toplam,
+                'kaynak_modul': 'Fatura', 'aciklama': f"Fatura No: {fis_data.get('fis_no', '')} peşin ödemesi",
+                'firma_id': fis_data['firma_id'], 'yil': fis_data['yil']
+            }
+            pesin_odeme_data['satirlar'] = list(self.satirlar.values())
+            pesin_odeme_data['satirlar'].append({
+                'hesap_turu': odeme_hesap_turu,
+                'hesap_id': odeme_hesap_id,
+                'borc': genel_toplam if is_tahsilat else 0,
+                'alacak': 0 if is_tahsilat else genel_toplam,
+                'aciklama': f"{self.fis_turu} peşin ödemesi"
+            })
+
+        conn = None
+        try:
+            conn = veritabani_baglan()
+            cursor = conn.cursor()
+            if self.fis_id:
+                fis_guncelle(cursor, self.fis_id, fis_data, list(self.satirlar.values()), pesin_odeme_data, kaynak_modul='Fatura')
+            else:
+                fis_kaydet(cursor, fis_data, list(self.satirlar.values()), pesin_odeme_data, kaynak_modul='Fatura')
+            conn.commit()
+            messagebox.showinfo("Başarılı", "Fatura başarıyla kaydedildi.", parent=self)
+            self.kapat()
+        except Exception as e:
+            if conn: conn.rollback()
+            messagebox.showerror("Veritabanı Hatası", f"Kayıt sırasında bir hata oluştu:\n{e}", parent=self)
+        finally:
+            if conn: conn.close()
+
+    def fis_verilerini_yukle(self):
+        conn = None
+        try:
+            conn = veritabani_baglan()
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM fisler WHERE id=?", (self.fis_id,))
+            fis_data = cursor.fetchone()
+            if not fis_data: 
+                messagebox.showerror("Hata", "Fatura bulunamadı.", parent=self)
+                self.kapat()
+                return
+            
+            fis_cols = [desc[0] for desc in cursor.description]
+            fis_dict = dict(zip(fis_cols, fis_data))
+
+            self.ent_tarih.set_date(datetime.strptime(fis_dict['tarih'], "%Y-%m-%d"))
+            self.ent_fis_no.insert(0, fis_dict.get('fis_no', ''))
+            self.ent_aciklama.insert(0, fis_dict.get('aciklama', ''))
+            self.lookup_cari.set(fis_dict.get('cari_id'))
+
+            if self.is_hizmet_faturasi:
+                join_table, join_col, birim_col = "hizmet_kartlari", "kart_adi", "'' as birim"
+                hesap_turu_filter = "Hizmet"
+            else:
+                join_table, join_col, birim_col = "stoklar", "stok_adi", "s.birim"
+                hesap_turu_filter = "Stok"
+
+            query = f"""
+                SELECT fs.*, s.{join_col} as hesap_adi, {birim_col} FROM fis_satirlari fs 
+                JOIN {join_table} s ON fs.hesap_id = s.id 
+                WHERE fs.fis_id=? AND fs.hesap_turu=?
+            """
+            cursor.execute(query, (self.fis_id, hesap_turu_filter))
+            satir_cols = [desc[0] for desc in cursor.description]
+            for row in cursor.fetchall():
+                satir_dict = dict(zip(satir_cols, row))
+                satir_id = str(uuid.uuid4())
+                toplam_tutar = (satir_dict['miktar'] * satir_dict['birim_fiyat']) + satir_dict['kdv_tutar']
+                
+                is_line_credit = ("Satış Faturası" in self.fis_turu) or ("Alış İade Faturası" in self.fis_turu)
+                borc, alacak = (0, toplam_tutar) if is_line_credit else (toplam_tutar, 0)
+
+                self.satirlar[satir_id] = {
+                    'hesap_turu': hesap_turu_filter, 'hesap_id': satir_dict['hesap_id'], 'stok_adi': satir_dict['hesap_adi'],
+                    'miktar': satir_dict['miktar'], 'birim': satir_dict['birim'], 'birim_fiyat': satir_dict['birim_fiyat'], 'aciklama': satir_dict.get('aciklama', ''),
+                    'kdv_oran': satir_dict['kdv_oran'], 'kdv_tutar': satir_dict['kdv_tutar'], 'toplam_tutar': toplam_tutar, 'borc': borc, 'alacak': alacak,
+                }
+                self.tree.insert("", "end", iid=satir_id, values=(
+                    satir_dict['hesap_adi'], satir_dict.get('aciklama', ''), f"{satir_dict['miktar']:,.2f}".replace(",", "X").replace(".", ",").replace("X", "."), satir_dict['birim'],
+                    format_currency(satir_dict['birim_fiyat']), format_currency(satir_dict['kdv_tutar']), format_currency(toplam_tutar), "❌"
+                ))
+            
+            cursor.execute("SELECT * FROM fisler WHERE kaynak_fis_id=?", (self.fis_id,))
+            odeme_fis = cursor.fetchone()
+            if odeme_fis:
+                odeme_fis_dict = dict(zip([d[0] for d in cursor.description], odeme_fis))
+                odeme_tipi_str = odeme_fis_dict['fis_turu'].split('(')[-1].strip(')')
+                self.cmb_odeme_tipi.set(odeme_tipi_str)
+                self.odeme_tipi_degisti()
+                
+                cursor.execute("SELECT hesap_id FROM fis_satirlari WHERE fis_id=? AND hesap_turu != 'Cari'", (odeme_fis_dict['id'],))
+                odeme_hesap_id = cursor.fetchone()[0]
+                self.lookup_odeme_hesap.set(odeme_hesap_id)
+
+            self.guncelle_toplamlari()
+
+        except Exception as e:
+            messagebox.showerror("Veri Yükleme Hatası", f"Fatura verileri yüklenirken bir hata oluştu: {e}", parent=self)
+        finally:
+            if conn: conn.close()
+
+    def kapat(self):
+        self.destroy()
+        self.list_view.pack(fill="both", expand=True)
+        self.list_view.listele()
+        if self.on_close:
+            self.on_close()
+
+    def yenile(self):
+        self.verileri_yukle()
+        self._setup_stok_lookup()

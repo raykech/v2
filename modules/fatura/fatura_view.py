@@ -1,0 +1,290 @@
+import tkinter as tk
+from tkinter import ttk, messagebox
+from tkcalendar import DateEntry
+from datetime import datetime
+import re # Kaynak modül ayrıştırması için eklendi
+from modules.fatura.fatura_form import FaturaFormu
+from core.db import veritabani_baglan
+from ui.widgets.tooltip import Tooltip # Tooltip için eklendi
+from utils.formatters import format_date, format_currency
+from core.services import fis_sil as fis_sil_service
+
+class FaturaModulu(tk.Frame):
+    def __init__(self, parent, main_app):
+        super().__init__(parent, bg="#f5f7fb")
+        self.main_app = main_app
+        self.parent = parent
+        self.form_instance = None
+        self.selected_fis_kaynak_modul = None # Seçili fişin kaynak modülü
+        self.selected_fis_kaynak_fis_id = None # Seçili fişin kaynak fiş ID'si
+        self.cari_dict = {}
+
+        self.create_widgets()
+        self._load_filter_data()
+        self.listele()
+
+    def create_widgets(self):
+        # Üst Buton Alanı
+        ust_frame = tk.Frame(self, bg="#f5f7fb")
+        ust_frame.pack(fill="x", pady=10, padx=10)
+
+        self.btn_yeni = tk.Menubutton(ust_frame, text="Yeni ▼", font=("Arial", 9, "bold"), padx=10, pady=4)
+        self.btn_yeni.pack(side="left", padx=(0, 10))
+        self.yeni_fis_menu = tk.Menu(self.btn_yeni, tearoff=0)
+        self.btn_yeni["menu"] = self.yeni_fis_menu
+        self.yeni_fis_menu.add_command(label="Satış Faturası", command=lambda: self._ac_yeni_form("Satış Faturası"))
+        self.yeni_fis_menu.add_command(label="Alış Faturası", command=lambda: self._ac_yeni_form("Alış Faturası"))
+        self.yeni_fis_menu.add_separator()
+        self.yeni_fis_menu.add_command(label="Satış İade Faturası", command=lambda: self._ac_yeni_form("Satış İade Faturası"))
+        self.yeni_fis_menu.add_command(label="Alış İade Faturası", command=lambda: self._ac_yeni_form("Alış İade Faturası"))
+        self.yeni_fis_menu.add_separator()
+        self.yeni_fis_menu.add_command(label="Hizmet Satış Faturası", command=lambda: self._ac_yeni_form("Hizmet Satış Faturası"))
+        self.yeni_fis_menu.add_command(label="Hizmet Alış Faturası", command=lambda: self._ac_yeni_form("Hizmet Alış Faturası"))
+
+        self.btn_duzenle = tk.Button(ust_frame, text="Düzenle", command=self.duzenle, font=("Arial", 9, "bold"), padx=10, pady=4)
+        self.btn_duzenle.pack(side="left", padx=(0, 10))
+
+        self.btn_sil = tk.Button(ust_frame, text="Sil", command=self.sil, font=("Arial", 9, "bold"), padx=10, pady=4)
+        self.btn_sil.pack(side="left")
+        
+        self.btn_kaynaga_git = tk.Button(
+            ust_frame,
+            text="Kaynağa Git",
+            command=self._kaynaga_git,
+            font=("Arial", 9, "bold"),
+            padx=10,
+            pady=4,
+        )
+        self.btn_kaynaga_git.pack(side="left", padx=(0, 10))
+
+        # Filtre Alanı
+        filter_frame = tk.LabelFrame(self, text="Filtrele", bg="#f5f7fb", padx=10, pady=5)
+        filter_frame.pack(fill="x", padx=10, pady=(10, 5))
+
+        tk.Label(filter_frame, text="Cari:", bg="#f5f7fb").pack(side="left", padx=(0, 2))
+        self.cmb_cari_filtre = ttk.Combobox(filter_frame, state="readonly", width=25)
+        self.cmb_cari_filtre.bind("<<ComboboxSelected>>", lambda e: self.listele())
+        self.cmb_cari_filtre.pack(side="left", padx=(0, 5))
+
+        tk.Label(filter_frame, text="Baş. Tarihi:", bg="#f5f7fb").pack(side="left", padx=(5, 2))
+        self.ent_bas_tarih = DateEntry(filter_frame, date_pattern="dd.mm.yyyy", width=10)
+        self.ent_bas_tarih.bind("<<DateEntrySelected>>", lambda e: self.listele())
+        self.ent_bas_tarih.set_date(datetime(self.main_app.aktif_yil, 1, 1))
+        self.ent_bas_tarih.pack(side="left", padx=(0, 5))
+
+        tk.Label(filter_frame, text="Bit. Tarihi:", bg="#f5f7fb").pack(side="left", padx=(5, 2))
+        self.ent_bit_tarih = DateEntry(filter_frame, date_pattern="dd.mm.yyyy", width=10)
+        self.ent_bit_tarih.bind("<<DateEntrySelected>>", lambda e: self.listele())
+        self.ent_bit_tarih.pack(side="left", padx=(0, 5))
+
+        tk.Label(filter_frame, text="Fatura Türü:", bg="#f5f7fb").pack(side="left", padx=(5, 2))
+        self.cmb_tur_filtre = ttk.Combobox(filter_frame, state="readonly", width=20, values=["Tümü", "Satış Faturası", "Alış Faturası", "Satış İade Faturası", "Alış İade Faturası", "Hizmet Satış Faturası", "Hizmet Alış Faturası"])
+        self.cmb_tur_filtre.set("Tümü")
+        self.cmb_tur_filtre.bind("<<ComboboxSelected>>", lambda e: self.listele())
+        self.cmb_tur_filtre.pack(side="left", padx=(0, 5))
+
+        tk.Label(filter_frame, text="Ara:", bg="#f5f7fb").pack(side="left", padx=(5, 2))
+        self.ent_arama = tk.Entry(filter_frame)
+        self.ent_arama.pack(side="left", fill="x", expand=True)
+        self.ent_arama.bind("<KeyRelease>", lambda e: self.listele())
+
+        btn_filtre_temizle = tk.Button(filter_frame, text="Filtreleri Temizle", command=self.filtreleri_temizle)
+        btn_filtre_temizle.pack(side="left", padx=(10, 0))
+
+        # Liste Alanı
+        tree_container = tk.Frame(self)
+        tree_container.pack(fill="both", expand=True, padx=10, pady=(0, 10))
+
+        self.tree = ttk.Treeview(tree_container, columns=("id", "tarih", "fis_no", "kaynak", "fis_turu", "cari_unvan", "aciklama", "toplam_tutar"), show="headings")
+        self.tree.heading("id", text="ID"); self.tree.heading("tarih", text="Tarih"); self.tree.heading("fis_no", text="Fatura No"); self.tree.heading("kaynak", text="Kaynak"); self.tree.heading("fis_turu", text="Fatura Türü"); self.tree.heading("cari_unvan", text="Cari Unvan"); self.tree.heading("aciklama", text="Açıklama"); self.tree.heading("toplam_tutar", text="Toplam Tutar", anchor="e")
+        self.tree.column("id", width=60, stretch=False, anchor="center"); self.tree.column("tarih", width=100, stretch=False, anchor="center"); self.tree.column("fis_no", width=80, stretch=False); self.tree.column("kaynak", width=120, stretch=False); self.tree.column("fis_turu", width=150, stretch=False); self.tree.column("cari_unvan", width=200); self.tree.column("aciklama", width=250); self.tree.column("toplam_tutar", width=120, stretch=False, anchor="e")
+
+        # Fatura modülü için "Kaynak" sütunu genellikle "Fatura" olacaktır, ancak tutarlılık için ekliyoruz.
+        # Eğer bir fatura başka bir yerden türeseydi (ki bu senaryoda pek olası değil), o zaman anlamlı olurdu.
+        vsb = ttk.Scrollbar(tree_container, orient="vertical", command=self.tree.yview)
+        hsb = ttk.Scrollbar(tree_container, orient="horizontal", command=self.tree.xview)
+        self.tree.configure(yscrollcommand=vsb.set, xscrollcommand=hsb.set)
+        vsb.pack(side="right", fill="y"); hsb.pack(side="bottom", fill="x"); self.tree.pack(side="left", fill="both", expand=True)
+
+    def _load_filter_data(self):
+        self.tree.bind("<<TreeviewSelect>>", self._on_tree_select)
+        self._update_action_buttons_state() # Başlangıçta buton durumlarını ayarla
+
+        try:
+            conn = veritabani_baglan()
+            cursor = conn.cursor()
+            cursor.execute("SELECT id, unvan FROM cariler WHERE durum=1 AND firma_id=?", (self.main_app.aktif_firma_id,))
+            self.cari_dict = {row[1]: row[0] for row in cursor.fetchall()}
+            conn.close()
+            self.cmb_cari_filtre['values'] = ["Tüm Cariler"] + list(self.cari_dict.keys())
+            self.cmb_cari_filtre.set("Tüm Cariler")
+        except Exception as e:
+            messagebox.showerror("Veri Yükleme Hatası", f"Cari listesi yüklenemedi: {e}", parent=self)
+
+    def _on_tree_select(self, event):
+        self._get_selected_fis_kaynak_info()
+        self._update_action_buttons_state()
+
+    def listele(self):
+        for i in self.tree.get_children(): self.tree.delete(i)
+        
+        where_clauses = ["f.firma_id=? AND f.yil=? AND f.fis_turu LIKE '%Faturası'"]
+        params = [self.main_app.aktif_firma_id, self.main_app.aktif_yil]
+        
+        where_clauses.append("f.tarih BETWEEN ? AND ?")
+        params.extend([self.ent_bas_tarih.get_date().strftime("%Y-%m-%d"), self.ent_bit_tarih.get_date().strftime("%Y-%m-%d")])
+
+        if self.cmb_cari_filtre.get() != "Tüm Cariler":
+            cari_id = self.cari_dict.get(self.cmb_cari_filtre.get())
+            if cari_id: where_clauses.append("f.cari_id = ?"); params.append(cari_id)
+
+        if self.cmb_tur_filtre.get() != "Tümü":
+            where_clauses.append("f.fis_turu = ?"); params.append(self.cmb_tur_filtre.get())
+
+        if self.ent_arama.get().strip():
+            where_clauses.append("(f.fis_no LIKE ? OR f.aciklama LIKE ?)")
+            params.extend([f"%{self.ent_arama.get().strip()}%", f"%{self.ent_arama.get().strip()}%"])
+
+        try:
+            conn = veritabani_baglan()
+            cursor = conn.cursor()
+            query = """
+                SELECT f.id, f.tarih, f.fis_no, f.kaynak_modul, f.kaynak_fis_id, f.fis_turu, c.unvan, f.aciklama, f.toplam_tutar 
+                FROM fisler f 
+                LEFT JOIN cariler c ON f.cari_id = c.id
+            """
+            if where_clauses: query += " WHERE " + " AND ".join(where_clauses)
+            query += " ORDER BY f.id DESC"
+            cursor.execute(query, params)
+            for fis in cursor.fetchall():
+                fis_id, tarih, fis_no, kaynak_modul, _, fis_turu, cari_unvan, aciklama, toplam_tutar = fis
+                kaynak_str = kaynak_modul or ""
+                self.tree.insert("", "end", values=(fis_id, format_date(tarih), fis_no or '', kaynak_str, fis_turu, cari_unvan or '', aciklama or '', format_currency(toplam_tutar)))
+            conn.close()
+        except Exception as e:
+            messagebox.showerror("Veri Yükleme Hatası", f"Faturalar yüklenemedi: {e}", parent=self)
+
+    def filtreleri_temizle(self):
+        self.cmb_cari_filtre.set("Tüm Cariler")
+        self.ent_bas_tarih.set_date(datetime(self.main_app.aktif_yil, 1, 1))
+        self.ent_bit_tarih.set_date(datetime.now())
+        self.cmb_tur_filtre.set("Tümü")
+        self.ent_arama.delete(0, tk.END)
+        self.listele()
+
+    def _ac_yeni_form(self, fis_turu):
+        self.pack_forget()
+        self.form_instance = FaturaFormu(self.parent, self.main_app, self, fis_turu=fis_turu, on_close=self.form_kapatildi)
+        self.form_instance.pack(fill="both", expand=True)
+
+    def duzenle(self):
+        if self.btn_duzenle['state'] == 'disabled':
+            return # Buton pasifse işlem yapma
+
+        selected_items = self.tree.selection()
+        if not selected_items:
+            messagebox.showwarning("Uyarı", "Lütfen düzenlemek için bir fatura seçin.", parent=self)
+            return
+        fis_id = self.tree.item(selected_items[0], "values")[0]
+        fis_turu = self.tree.item(selected_items[0], "values")[4] # Fiş türü 4. sütunda
+        self.pack_forget()
+        self.form_instance = FaturaFormu(self.parent, self.main_app, self, fis_id=fis_id, fis_turu=fis_turu, on_close=self.form_kapatildi)
+        self.form_instance.pack(fill="both", expand=True)
+
+    def sil(self):
+        if self.btn_sil['state'] == 'disabled':
+            return # Buton pasifse işlem yapma
+
+        selected_items = self.tree.selection()
+        if not selected_items:
+            messagebox.showwarning("Uyarı", "Lütfen silmek için bir fatura seçin.", parent=self)
+            return
+        fis_id = self.tree.item(selected_items[0], "values")[0]
+        if not messagebox.askyesno("Silme Onayı", f"ID: {fis_id} olan faturayı ve tüm satırlarını (ve varsa peşin ödeme fişini) silmek istediğinizden emin misiniz?\nBu işlem geri alınamaz!", parent=self):
+            return
+        conn = None
+        try:
+            conn = veritabani_baglan()
+            cursor = conn.cursor()
+            fis_sil_service(cursor, fis_id, self.main_app.aktif_firma_id)
+            conn.commit()
+            messagebox.showinfo("Başarılı", "Fatura başarıyla silindi.", parent=self)
+            self.listele()
+        except Exception as e:
+            if conn: conn.rollback()
+            messagebox.showerror("Veritabanı Hatası", f"Silme işlemi sırasında bir hata oluştu:\n{e}", parent=self)
+        finally:
+            if conn: conn.close()
+
+    def _get_selected_fis_kaynak_info(self):
+        """Seçili fişin kaynak modül ve fiş ID bilgilerini günceller."""
+        selected_items = self.tree.selection()
+        if not selected_items:
+            self.selected_fis_kaynak_modul = None
+            self.selected_fis_kaynak_fis_id = None
+            return
+
+        selected_item = selected_items[0]
+        values = self.tree.item(selected_item, "values")
+        
+        fis_id = values[0]
+        
+        # Arayüzdeki metne güvenmek yerine, DB'den kesin bilgiyi al
+        conn = veritabani_baglan()
+        cursor = conn.cursor()
+        cursor.execute("SELECT kaynak_modul, kaynak_fis_id FROM fisler WHERE id=?", (fis_id,))
+        result = cursor.fetchone()
+        conn.close()
+        
+        if result:
+            self.selected_fis_kaynak_modul, self.selected_fis_kaynak_fis_id = result
+        else:
+            self.selected_fis_kaynak_modul, self.selected_fis_kaynak_fis_id = None, None
+
+    def _update_action_buttons_state(self):
+        """Seçili fişin kaynak modülüne göre butonların durumunu günceller."""
+        if self.selected_fis_kaynak_modul and self.selected_fis_kaynak_modul != "Fatura":
+            # Başka bir modülden geliyorsa düzenleme/silme pasif, kaynağa git aktif
+            self.btn_duzenle.config(state="disabled")
+            self.btn_sil.config(state="disabled")
+            self.btn_kaynaga_git.config(state="normal")
+            
+            tooltip_text = f"Bu fiş '{self.selected_fis_kaynak_modul}' modülünden oluşturulmuştur. Değişiklik yapmak için kaynak belgeye gidin."
+            if not hasattr(self.btn_duzenle, '_tooltip'):
+                self.btn_duzenle._tooltip = Tooltip(self.btn_duzenle, tooltip_text)
+                self.btn_sil._tooltip = Tooltip(self.btn_sil, tooltip_text)
+            else:
+                self.btn_duzenle._tooltip.update_text(tooltip_text)
+                self.btn_sil._tooltip.update_text(tooltip_text)
+        else:
+            # Kendi modülünden geliyorsa veya seçili fiş yoksa normal
+            self.btn_duzenle.config(state="normal")
+            self.btn_sil.config(state="normal")
+            self.btn_kaynaga_git.config(state="disabled")
+            if hasattr(self.btn_duzenle, '_tooltip'): # Tooltip'i gizle/kaldır
+                self.btn_duzenle._tooltip.hide_tooltip()
+                self.btn_sil._tooltip.hide_tooltip()
+
+    def _kaynaga_git(self):
+        """Kaynağa Git butonuna basıldığında ilgili modüle yönlendirir."""
+        if self.selected_fis_kaynak_modul and self.selected_fis_kaynak_fis_id:
+            self.main_app.go_to_module_and_select_fis(self.selected_fis_kaynak_modul.lower(), self.selected_fis_kaynak_fis_id)
+
+    def form_kapatildi(self):
+        self.form_instance = None
+
+    def yenile(self):
+        if self.form_instance:
+            self.form_instance.yenile()
+        else:
+            self._load_filter_data()
+            self.listele()
+
+    def select_and_highlight_fis(self, fis_id):
+        """Belirtilen fişi Treeview'de seçer ve görünür hale getirir."""
+        self.filtreleri_temizle() # Önce filtreleri temizle
+        for item in self.tree.get_children():
+            if int(self.tree.item(item, "values")[0]) == int(fis_id):
+                self.tree.selection_set(item)
+                self.tree.see(item)
+                break

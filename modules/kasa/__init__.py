@@ -1,0 +1,1 @@
+# Bu dosya, 'kasa' klasörünün bir Python paketi olduğunu belirtir.

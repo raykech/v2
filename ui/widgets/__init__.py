@@ -1,0 +1,1 @@
+# Bu dosya, 'widgets' klasörünün bir Python paketi olduğunu belirtir.

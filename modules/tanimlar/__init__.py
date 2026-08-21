@@ -1,0 +1,1 @@
+# Bu dosya, 'tanimlar' klasörünün bir Python paketi olduğunu belirtir.

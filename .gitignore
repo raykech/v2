@@ -1,0 +1,11 @@
+# Python
+__pycache__/
+__eski_dökümanlar__/
+tests/
+*.py[cod]
+
+# Virtual Environment
+.venv/
+
+# Log files
+*.log
