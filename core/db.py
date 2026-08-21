@@ -110,6 +110,23 @@ def tablolari_olustur():
     columns = [col[1] for col in cursor.fetchall()]
     if 'kdv_oran' not in columns:
         cursor.execute("ALTER TABLE hizmet_kartlari ADD COLUMN kdv_oran REAL DEFAULT 20")
+    # grup_id sütununu ekle (eğer yoksa)
+    if 'grup_id' not in columns:
+        cursor.execute("ALTER TABLE hizmet_kartlari ADD COLUMN grup_id INTEGER")
+
+    # Hizmet Kartları Grupları tablosu (mizan için ana hesap grubu)
+    cursor.execute(
+        """
+        CREATE TABLE IF NOT EXISTS hizmet_kartlari_gruplari (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            grup_adi TEXT NOT NULL,
+            tur TEXT NOT NULL DEFAULT 'Gider',   -- 'Gider' / 'Gelir'
+            firma_id INTEGER DEFAULT 1,
+            durum INTEGER DEFAULT 1,
+            UNIQUE(grup_adi, tur, firma_id)
+        )
+        """
+    )
 
     cursor.execute(
         """
@@ -213,6 +230,24 @@ def tablolari_olustur():
     """
     )
 
+    # cekler_senetler tablosuna yeni alanları ekle (mevcut veritabanı için)
+    cursor.execute("PRAGMA table_info(cekler_senetler)")
+    columns = [col[1] for col in cursor.fetchall()]
+    if 'banka_id' not in columns:
+        cursor.execute("ALTER TABLE cekler_senetler ADD COLUMN banka_id INTEGER")
+    if 'kesideci' not in columns:
+        cursor.execute("ALTER TABLE cekler_senetler ADD COLUMN kesideci TEXT DEFAULT ''")
+    if 'ciranta' not in columns:
+        cursor.execute("ALTER TABLE cekler_senetler ADD COLUMN ciranta TEXT DEFAULT ''")
+    if 'aciklama' not in columns:
+        cursor.execute("ALTER TABLE cekler_senetler ADD COLUMN aciklama TEXT DEFAULT ''")
+
+    # cek_senet_hareketleri tablosuna fis_id alanını ekle (mevcut veritabanı için)
+    cursor.execute("PRAGMA table_info(cek_senet_hareketleri)")
+    columns = [col[1] for col in cursor.fetchall()]
+    if 'fis_id' not in columns:
+        cursor.execute("ALTER TABLE cek_senet_hareketleri ADD COLUMN fis_id INTEGER")
+
     # --- PERFORMANS İYİLEŞTİRMESİ ---
     # Yeni yapıya uygun indexler
     cursor.execute("""
@@ -234,6 +269,28 @@ def tablolari_olustur():
     )
     cursor.execute("INSERT OR IGNORE INTO firmalar (id, firma_adi, durum) VALUES (1, 'Ana Firma (Varsayılan)', 1)")
 
+    # --- HİZMET KARTI GRUPLARI: her firma için "Diğer" gider/gelir grubu oluştur ---
+    cursor.execute("SELECT id FROM firmalar")
+    firma_ids = [row[0] for row in cursor.fetchall()]
+    for fid in firma_ids:
+        for tur in ("Gider", "Gelir"):
+            cursor.execute(
+                "INSERT OR IGNORE INTO hizmet_kartlari_gruplari (grup_adi, tur, firma_id, durum) VALUES (?, ?, ?, 1)",
+                ("Diğer", tur, fid),
+            )
+
+    # Grubu atanmamış mevcut kartları kendi türündeki "Diğer" grubuna ata
+    cursor.execute(
+        """
+        UPDATE hizmet_kartlari
+        SET grup_id = (
+            SELECT g.id FROM hizmet_kartlari_gruplari g
+            WHERE g.grup_adi = 'Diğer' AND g.tur = hizmet_kartlari.tur
+              AND g.firma_id = hizmet_kartlari.firma_id
+        )
+        WHERE grup_id IS NULL
+        """
+    )
 
     conn.commit()
     conn.close()

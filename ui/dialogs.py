@@ -14,6 +14,7 @@ def ac_kart_dialog(parent, tablo_adi, item_id=None, firma_id=1, kart_turu=None):
         "kasalar": KasaDialog,
         "banka_kurumlari": BankaKurumDialog,
         "hizmet_kartlari": HizmetDialog,
+        "hizmet_kartlari_gruplari": HizmetKartGrupDialog,
         "stok_kategorileri": GenelTanimDialog,
         "stok_birimleri": GenelTanimDialog,
     }
@@ -24,7 +25,7 @@ def ac_kart_dialog(parent, tablo_adi, item_id=None, firma_id=1, kart_turu=None):
         baslik_prefix = tablo_adi.replace('_', ' ').capitalize()
         title = f"Yeni {baslik_prefix.replace('Stok ', '')} Ekle" if not item_id else f"{baslik_prefix.replace('Stok ', '')} Düzenle"
         
-        if tablo_adi == 'hizmet_kartlari':
+        if tablo_adi in ('hizmet_kartlari', 'hizmet_kartlari_gruplari'):
             dialog = dialog_class(parent, title, item_id=item_id, firma_id=firma_id, kart_turu=kart_turu)
         elif tablo_adi in ["stok_kategorileri", "stok_birimleri"]:
             grup_adi = "Stok Kategorisi" if tablo_adi == "stok_kategorileri" else "Stok Birimi"
@@ -116,6 +117,84 @@ class BankaKurumDialog(BaseDialog):
             if conn: conn.rollback()
         finally:
             if conn: conn.close()
+
+class HizmetKartGrupDialog(BaseDialog):
+    def __init__(self, parent, title, item_id=None, kart_turu=None, firma_id=1):
+        self.kart_turu = kart_turu
+        super().__init__(parent, title, item_id, firma_id)
+
+    def create_widgets(self):
+        form_frame = tk.Frame(self, padx=15, pady=15)
+        form_frame.pack(fill="both", expand=True)
+
+        tk.Label(form_frame, text="Grup Adı:").grid(row=0, column=0, sticky="w", pady=5)
+        self.ent_grup_adi = tk.Entry(form_frame, width=40)
+        self.ent_grup_adi.grid(row=0, column=1, padx=5, pady=5)
+
+        tk.Label(form_frame, text="Tür:").grid(row=1, column=0, sticky="w", pady=5)
+        self.cmb_tur = ttk.Combobox(form_frame, values=["Gider", "Gelir"], state="readonly")
+        self.cmb_tur.grid(row=1, column=1, padx=5, pady=5, sticky="ew")
+        if self.kart_turu:
+            # Kartın türü biliniyorsa (lookup'tan açıldıysa) türü kilitle
+            self.cmb_tur.set(self.kart_turu)
+            self.cmb_tur.config(state="disabled")
+        else:
+            self.cmb_tur.set("Gider")
+
+        self.ent_grup_adi.focus_set()
+
+        btn_frame = tk.Frame(self, pady=10)
+        btn_frame.pack(fill="x", padx=15)
+
+        btn_save = tk.Button(btn_frame, text="Kaydet", command=self.on_save, bg="#198754", fg="white", width=12)
+        btn_save.pack(side="right")
+
+        btn_cancel = tk.Button(btn_frame, text="İptal", command=self.destroy, width=12)
+        btn_cancel.pack(side="right", padx=10)
+
+    def load_data_for_edit(self):
+        conn = veritabani_baglan()
+        cursor = conn.cursor()
+        cursor.execute("SELECT grup_adi, tur FROM hizmet_kartlari_gruplari WHERE id = ?", (self.item_id,))
+        data = cursor.fetchone()
+        conn.close()
+        if data:
+            self.ent_grup_adi.insert(0, data[0])
+            self.cmb_tur.set(data[1])
+
+    def on_save(self):
+        grup_adi = self.ent_grup_adi.get().strip()
+        if not grup_adi:
+            messagebox.showerror("Hata", "Grup Adı boş bırakılamaz.", parent=self)
+            return
+
+        grup_data = {
+            'id': self.item_id,
+            'grup_adi': grup_adi,
+            'tur': self.cmb_tur.get(),
+            'firma_id': self.firma_id,
+            'durum': 1,
+        }
+
+        conn = None
+        try:
+            conn = veritabani_baglan()
+            cursor = conn.cursor()
+            new_id = kaydet_kart(cursor, "hizmet_kartlari_gruplari", grup_data)
+            conn.commit()
+
+            self.result = (new_id, grup_adi)
+            self.destroy()
+
+        except sqlite3.IntegrityError:
+            messagebox.showerror("Hata", f"'{grup_adi}' adında bir grup zaten mevcut.", parent=self)
+            if conn: conn.rollback()
+        except Exception as e:
+            messagebox.showerror("Veritabanı Hatası", f"Kayıt sırasında bir hata oluştu: {e}", parent=self)
+            if conn: conn.rollback()
+        finally:
+            if conn: conn.close()
+
 
 class CariDialog(BaseDialog):
     def create_widgets(self):

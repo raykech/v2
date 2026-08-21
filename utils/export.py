@@ -122,17 +122,29 @@ def export_treeview_data(tree, report_title, format_type):
     columns = [tree.heading(col)["text"] for col in tree["columns"] if tree.column(col, "width") > 0]
     column_ids = [col for col in tree["columns"] if tree.column(col, "width") > 0]
     
-    data = []
-    for item in tree.get_children():
-        values = tree.item(item)['values']
-        row_data = {tree["columns"][i]: (values[i] if i < len(values) else "") for i in range(len(tree["columns"]))}
-        
-        # Excel için sayısal değerleri temizle
-        if format_type == 'excel':
-            processed_row = [_parse_numeric_value(row_data.get(col_id, "")) for col_id in column_ids]
-            data.append(processed_row)
-        else: # PDF için formatlı kalsın
-            data.append([row_data.get(col_id, "") for col_id in column_ids])
+    def _topla_satirlar(parent_id="", derinlik=0):
+        """Treeview'i hiyerarşik olarak gez; alt satırları girintili topla."""
+        satirlar = []
+        for item in tree.get_children(parent_id):
+            values = tree.item(item)['values']
+            satir = []
+            for col_id in column_ids:
+                idx = tree["columns"].index(col_id)
+                deger = values[idx] if idx < len(values) else ""
+                # Alt satırlarda ilk sütuna hiyerarşiyi göstermek için girinti ekle
+                if derinlik > 0 and col_id == column_ids[0]:
+                    deger = "    " * derinlik + str(deger)
+                satir.append(deger)
+
+            # Excel için sayısal değerleri temizle
+            if format_type == 'excel':
+                satir = [_parse_numeric_value(v) for v in satir]
+
+            satirlar.append(satir)
+            satirlar.extend(_topla_satirlar(item, derinlik + 1))
+        return satirlar
+
+    data = _topla_satirlar()
 
     df = pd.DataFrame(data, columns=columns)
 

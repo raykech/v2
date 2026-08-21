@@ -26,6 +26,7 @@ class CariModulu(tk.Frame):
         self.form_instance = None
         self.selected_fis_kaynak_modul = None
         self.selected_fis_kaynak_fis_id = None
+        self.selected_fis_id = None
         self.cari_dict = {}
 
         self.create_widgets()
@@ -292,10 +293,12 @@ class CariModulu(tk.Frame):
         if not selected_items:
             self.selected_fis_kaynak_modul = None
             self.selected_fis_kaynak_fis_id = None
+            self.selected_fis_id = None
             return
 
         values = self.tree.item(selected_items[0], "values")
         fis_id = values[0]
+        self.selected_fis_id = int(fis_id) # Fişin kendi ID'sini de sakla
 
         conn = veritabani_baglan()
         cursor = conn.cursor()
@@ -330,9 +333,16 @@ class CariModulu(tk.Frame):
                 self.btn_sil._tooltip.hide_tooltip()
 
     def _kaynaga_git(self):
-        if self.selected_fis_kaynak_modul and self.selected_fis_kaynak_fis_id:
+        if not self.selected_fis_kaynak_modul:
+            return
+        hedef_fis_id = self.selected_fis_kaynak_fis_id
+        if hedef_fis_id is None:
+            # Bu fiş başka bir modüle ait ama türetilmiş değil (örn: Cari listesinde görünen başka modül fişi).
+            # Kaynak modülde bu fişin kendisini seç.
+            hedef_fis_id = self.selected_fis_id
+        if hedef_fis_id is not None:
             self.main_app.go_to_module_and_select_fis(
-                self.selected_fis_kaynak_modul.lower(), self.selected_fis_kaynak_fis_id
+                self.selected_fis_kaynak_modul.lower(), hedef_fis_id
             )
 
     def form_kapatildi(self):
@@ -348,8 +358,21 @@ class CariModulu(tk.Frame):
     def select_and_highlight_fis(self, fis_id):
         """Belirtilen fişi Treeview'de seçer ve görünür hale getirir."""
         self.filtreleri_temizle()
+        secilen = None
         for item in self.tree.get_children():
             if int(self.tree.item(item, "values")[0]) == int(fis_id):
-                self.tree.selection_set(item)
-                self.tree.see(item)
+                secilen = item
                 break
+        if secilen is None:
+            # Tarih aralığı hedef fişi kapsamıyorsa aralığı genişletip tekrar ara
+            self.ent_bas_tarih_filtre.set_date(datetime(self.main_app.aktif_yil - 1, 1, 1))
+            self.ent_bit_tarih_filtre.set_date(datetime(self.main_app.aktif_yil + 1, 12, 31))
+            self.listele()
+            for item in self.tree.get_children():
+                if int(self.tree.item(item, "values")[0]) == int(fis_id):
+                    secilen = item
+                    break
+        if secilen is not None:
+            self.tree.selection_set(secilen)
+            self.tree.see(secilen)
+            self._on_tree_select(None) # Buton durumlarını da güncelle

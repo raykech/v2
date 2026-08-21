@@ -3,6 +3,7 @@ from tkinter import ttk
 
 from .stok_durum_raporu_view import StokDurumRaporuView
 from .hesap_ekstresi_view import HesapEkstresiView
+from .hizmet_kartlari_raporu_view import HizmetKartlariRaporuView
 
 class RaporlarModulu(tk.Frame):
     def __init__(self, parent, main_app):
@@ -29,6 +30,12 @@ class RaporlarModulu(tk.Frame):
 
         self.banka_ekstre_tab = HesapEkstresiView(self.notebook, self.main_app, hesap_turu="Banka")
         self.notebook.add(self.banka_ekstre_tab, text="Banka Ekstresi")
+
+        self.hizmet_kartlari_raporu_tab = HizmetKartlariRaporuView(self.notebook, self.main_app)
+        self.notebook.add(self.hizmet_kartlari_raporu_tab, text="Hizmet Kartları Raporu")
+
+        self.hizmet_kartlari_detay_tab = HesapEkstresiView(self.notebook, self.main_app, hesap_turu="Hizmet")
+        self.notebook.add(self.hizmet_kartlari_detay_tab, text="Hizmet Kartları Detay")
 
     def yenile(self):
         selected_widget = self.notebook.nametowidget(self.notebook.select())

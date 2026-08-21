@@ -369,7 +369,7 @@ class KasaFisiFormu(tk.Frame):
             )
             self.toggle_hedef_kasa_alani(False)
 
-        elif self.fis_turu == "Kasa Tahsil Fişi":
+        elif self.fis_turu == "Kasa Gelir Fişi":
             gelir_kartlari = {k: v['id'] for k, v in self.hizmet_dict.items() if v['tur'] == 'Gelir'}
             self.lookup_hesap.configure_lookup(
                 title="Gelir Kartı Seç", data_dict=gelir_kartlari, on_new=lambda: self.yeni_kart_ekle("hizmet_kartlari", "Gelir")

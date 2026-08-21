@@ -185,6 +185,7 @@ def kart_sil(cursor, tablo_adi, kart_id, firma_id):
 GECERLI_KART_TABLOLARI = {
     "cariler", "stoklar", "kasalar", "banka_hesaplari",
     "hizmet_kartlari", "genel_tanimlar", "banka_kurumlari",
+    "hizmet_kartlari_gruplari",
 }
 
 def kaydet_kart(cursor, tablo_adi, veri_sozlugu):
@@ -217,3 +218,116 @@ def kaydet_kart(cursor, tablo_adi, veri_sozlugu):
         params = list(veri.values())
         cursor.execute(f"INSERT INTO {tablo_adi} ({columns}) VALUES ({placeholders})", params)
         return cursor.lastrowid
+
+
+
+# ---------------------------------------------------------------- Çek/Senet özel yardımcılar
+def cek_senet_guncel_durum(cursor, cek_senet_id):
+    """Bir çek/senedin en son hareketine göre güncel durumunu döndürür."""
+    cursor.execute(
+        "SELECT durum FROM cek_senet_hareketleri WHERE cek_senet_id = ? ORDER BY id DESC LIMIT 1",
+        (cek_senet_id,),
+    )
+    row = cursor.fetchone()
+    return row[0] if row else "Portföyde"
+
+
+def cek_senet_son_banka_takas(cursor, cek_senet_id):
+    """Son 'Bankada Tahsilde' hareketindeki karşı banka hesap bilgisini döndürür."""
+    cursor.execute(
+        """
+        SELECT karsi_hesap_id, karsi_hesap_ismi
+        FROM cek_senet_hareketleri
+        WHERE cek_senet_id = ? AND durum = 'Bankada Tahsilde'
+        ORDER BY id DESC LIMIT 1
+        """,
+        (cek_senet_id,),
+    )
+    return cursor.fetchone()
+
+
+def cek_senet_fis_son_hareket_mi(cursor, fis_id):
+    """
+    Bir fişteki tüm çek/senet hareketlerinin, ilgili çek/senetlerin son hareketi
+    olup olmadığını kontrol eder. Son hareket ise True döner.
+    """
+    cursor.execute(
+        """
+        SELECT COUNT(*)
+        FROM cek_senet_hareketleri h
+        WHERE h.fis_id = ?
+          AND h.id < (SELECT MAX(id) FROM cek_senet_hareketleri WHERE cek_senet_id = h.cek_senet_id)
+        """,
+        (fis_id,),
+    )
+    row = cursor.fetchone()
+    return row[0] == 0
+
+
+def cek_senet_hareket_ekle(
+    cursor,
+    cek_senet_id,
+    fis_id,
+    islem_tarihi,
+    durum,
+    karsi_hesap_tipi=None,
+    karsi_hesap_id=None,
+    karsi_hesap_ismi=None,
+    aciklama="",
+    firma_id=1,
+):
+    """cek_senet_hareketleri tablosuna tek hareket ekler."""
+    cursor.execute(
+        """
+        INSERT INTO cek_senet_hareketleri
+            (cek_senet_id, fis_id, islem_tarihi, durum,
+             karsi_hesap_tipi, karsi_hesap_id, karsi_hesap_ismi, aciklama, firma_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            cek_senet_id,
+            fis_id,
+            islem_tarihi,
+            durum,
+            karsi_hesap_tipi,
+            karsi_hesap_id,
+            karsi_hesap_ismi,
+            aciklama,
+            firma_id,
+        ),
+    )
+
+
+def cek_senet_fis_sil(cursor, fis_id, firma_id):
+    """
+    Çek/Senet modülündeki bir fişi siler.
+    Önce o fişe bağlı çek/senet hareketlerini, ardından fişi ve satırlarını siler.
+    Eğer Giriş fişi siliniyorsa ve oluşturulan çek/senet kartları başka hiçbir harekette
+    kullanılmamışsa kartları da temizler.
+    """
+    # Bu fişe bağlı hareketleri bul
+    cursor.execute("SELECT id, cek_senet_id FROM cek_senet_hareketleri WHERE fis_id = ?", (fis_id,))
+    hareketler = cursor.fetchall()
+
+    # Fişte CekSenet satırı olarak geçen kartları bul (Giriş fişi için)
+    cursor.execute(
+        "SELECT hesap_id FROM fis_satirlari WHERE fis_id = ? AND hesap_turu = 'CekSenet'",
+        (fis_id,),
+    )
+    cek_senet_ids = [row[0] for row in cursor.fetchall()]
+
+    # Hareketleri sil
+    cursor.execute("DELETE FROM cek_senet_hareketleri WHERE fis_id = ?", (fis_id,))
+
+    # Ana fişi ve satırlarını sil
+    fis_sil(cursor, fis_id, firma_id)
+
+    # Giriş fişinde oluşturulmuş kartları, başka hareketleri yoksa temizle
+    if cek_senet_ids:
+        for cek_senet_id in cek_senet_ids:
+            cursor.execute(
+                "SELECT COUNT(*) FROM cek_senet_hareketleri WHERE cek_senet_id = ?",
+                (cek_senet_id,),
+            )
+            if cursor.fetchone()[0] == 0:
+                cursor.execute("DELETE FROM cekler_senetler WHERE id = ?", (cek_senet_id,))

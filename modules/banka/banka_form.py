@@ -10,6 +10,16 @@ from utils.formatters import CurrencyFormatter, parse_currency
 
 
 class BankaFisiFormu(tk.Frame):
+    # Satır listesi kullanmayan, kaynak-hedef şeklinde tek tutarlı fiş türleri
+    TEK_TUTARLI_FIS_TURLERI = (
+        "Bankalar Arası Virman",
+        "Blokeyi Bankaya Aktar",
+        "Bankaya Yatan",
+        "Bankadan Çekilen",
+        "Gelen Banka Transferi",
+        "Giden Banka Transferi",
+    )
+
     def __init__(self, parent, main_app, view_container, fis_turu, fis_id=None, on_close=None):
         super().__init__(parent, bg="#f5f7fb")
         self.main_app = main_app
@@ -23,6 +33,10 @@ class BankaFisiFormu(tk.Frame):
         self.satirlar = {}
         self.hizmet_dict = {}
         self.banka_dict = {}
+        self.pos_dict = {}
+        self.non_pos_dict = {}
+        self.kasa_dict = {}
+        self.cari_dict = {}
 
         self.create_widgets()
         self.verileri_yukle()
@@ -56,7 +70,8 @@ class BankaFisiFormu(tk.Frame):
         self.lbl_fis_turu = tk.Label(baslik_frame, text=self.fis_turu, font=("Arial", 10, "bold"), anchor="w", bg="white", relief="sunken", padx=5)
         self.lbl_fis_turu.grid(row=0, column=1, padx=5, pady=2, sticky="ew")
 
-        tk.Label(baslik_frame, text="Ana Banka Hesabı:").grid(row=2, column=0, sticky="w", pady=2)
+        self.lbl_ana_banka = tk.Label(baslik_frame, text="Ana Banka Hesabı:")
+        self.lbl_ana_banka.grid(row=2, column=0, sticky="w", pady=2)
         self.lookup_ana_banka = LookupWidget(baslik_frame)
         self.lookup_ana_banka.grid(row=2, column=1, columnspan=3, padx=5, pady=2, sticky="ew")
 
@@ -339,11 +354,21 @@ class BankaFisiFormu(tk.Frame):
             for row in cursor.fetchall()
         }
 
-        cursor.execute("SELECT id, hesap_adi FROM banka_hesaplari WHERE durum=1 AND firma_id=?", (firma_id,))
-        self.banka_dict = {row[1]: row[0] for row in cursor.fetchall()}
+        cursor.execute("SELECT id, hesap_adi, hesap_turu FROM banka_hesaplari WHERE durum=1 AND firma_id=?", (firma_id,))
+        banka_rows = cursor.fetchall()
+        self.banka_dict = {row[1]: row[0] for row in banka_rows}
+        self.pos_dict = {row[1]: row[0] for row in banka_rows if row[2] == 'POS'}
+        self.non_pos_dict = {row[1]: row[0] for row in banka_rows if row[2] != 'POS'}
         self.lookup_ana_banka.configure_lookup(
             title="Ana Banka Hesabı Seç", data_dict=self.banka_dict, on_new=lambda: self.yeni_kart_ekle("banka_hesaplari")
         )
+
+        # Kasa ve Cari listeleri (yatan/çekilen ve transfer fişlerinin karşı hesabı için)
+        cursor.execute("SELECT id, kasa_adi FROM kasalar WHERE durum=1 AND firma_id=?", (firma_id,))
+        self.kasa_dict = {row[1]: row[0] for row in cursor.fetchall()}
+
+        cursor.execute("SELECT id, unvan FROM cariler WHERE durum=1 AND firma_id=?", (firma_id,))
+        self.cari_dict = {row[1]: row[0] for row in cursor.fetchall()}
 
         conn.close()
 
@@ -356,17 +381,28 @@ class BankaFisiFormu(tk.Frame):
             )
             self.toggle_hedef_banka_alani(False)
 
-        elif self.fis_turu == "Banka Tahsil Fişi":
+        elif self.fis_turu == "Banka Gelir Fişi":
             gelir_kartlari = {k: v['id'] for k, v in self.hizmet_dict.items() if v['tur'] == 'Gelir'}
             self.lookup_hesap.configure_lookup(
                 title="Gelir Kartı Seç", data_dict=gelir_kartlari, on_new=lambda: self.yeni_kart_ekle("hizmet_kartlari", "Gelir")
             )
             self.toggle_hedef_banka_alani(False)
 
-        elif self.fis_turu == "Bankalar Arası Virman":
+        elif self.fis_turu in self.TEK_TUTARLI_FIS_TURLERI:
             self.lookup_hesap.configure_lookup(title="Hesap Seç", data_dict={})
             self.liste_frame.pack_forget()
             self.toggle_hedef_banka_alani(True)
+            if self.fis_turu == "Blokeyi Bankaya Aktar":
+                self.lbl_ana_banka.config(text="Kaynak POS Hesabı:")
+                self.lbl_virman_tutar.config(text="Aktarım Tutarı:")
+            elif self.fis_turu in ("Bankaya Yatan", "Bankadan Çekilen"):
+                self.lbl_ana_banka.config(text="Banka Hesabı:")
+                self.lbl_hedef_banka.config(text="Karşı Hesap (Kasa):")
+                self.lbl_virman_tutar.config(text="Tutar:")
+            elif self.fis_turu in ("Gelen Banka Transferi", "Giden Banka Transferi"):
+                self.lbl_ana_banka.config(text="Banka Hesabı:")
+                self.lbl_hedef_banka.config(text="Cari:")
+                self.lbl_virman_tutar.config(text="Tutar:")
 
         self.lookup_hesap.clear()
 
@@ -375,9 +411,34 @@ class BankaFisiFormu(tk.Frame):
         if goster:
             self.lbl_hedef_banka.grid(row=3, column=0, sticky="w", pady=2)
             self.lookup_hedef_banka.grid(row=3, column=1, columnspan=3, padx=5, pady=2, sticky="ew")
-            self.lookup_hedef_banka.configure_lookup(
-                title="Hedef Banka Hesabı Seç", data_dict=self.banka_dict, on_new=lambda: self.yeni_kart_ekle("banka_hesaplari")
-            )
+            if self.fis_turu == "Blokeyi Bankaya Aktar":
+                # Kaynak: yalnızca POS türü hesaplar, Hedef: POS olmayan hesaplar
+                self.lookup_ana_banka.configure_lookup(
+                    title="Kaynak POS Hesabı Seç", data_dict=self.pos_dict, on_new=lambda: self.yeni_kart_ekle("banka_hesaplari")
+                )
+                self.lookup_hedef_banka.configure_lookup(
+                    title="Hedef Banka Hesabı Seç", data_dict=self.non_pos_dict, on_new=lambda: self.yeni_kart_ekle("banka_hesaplari")
+                )
+            elif self.fis_turu in ("Bankaya Yatan", "Bankadan Çekilen"):
+                # Ana: normal banka hesabı, Karşı: yalnızca Kasa (POS işlemleri 'Blokeyi Bankaya Aktar' fişinde)
+                self.lookup_ana_banka.configure_lookup(
+                    title="Banka Hesabı Seç", data_dict=self.non_pos_dict, on_new=lambda: self.yeni_kart_ekle("banka_hesaplari")
+                )
+                self.lookup_hedef_banka.configure_lookup(
+                    title="Karşı Hesap Seç (Kasa)", data_dict=self.kasa_dict, on_new=lambda: self.yeni_kart_ekle("kasalar")
+                )
+            elif self.fis_turu in ("Gelen Banka Transferi", "Giden Banka Transferi"):
+                # Ana: normal banka hesabı, Karşı: Cari
+                self.lookup_ana_banka.configure_lookup(
+                    title="Banka Hesabı Seç", data_dict=self.non_pos_dict, on_new=lambda: self.yeni_kart_ekle("banka_hesaplari")
+                )
+                self.lookup_hedef_banka.configure_lookup(
+                    title="Cari Seç", data_dict=self.cari_dict, on_new=lambda: self.yeni_kart_ekle("cariler")
+                )
+            else:
+                self.lookup_hedef_banka.configure_lookup(
+                    title="Hedef Banka Hesabı Seç", data_dict=self.banka_dict, on_new=lambda: self.yeni_kart_ekle("banka_hesaplari")
+                )
             self.lbl_virman_tutar.grid(row=4, column=0, sticky="w", pady=5)
             self.ent_virman_tutar.grid(row=4, column=1, padx=5, pady=5, sticky="ew")
         else:
@@ -388,7 +449,7 @@ class BankaFisiFormu(tk.Frame):
 
     def _aciklamadan_sonra_fokus(self, event=None):
         """Fiş başlığındaki açıklamadan sonra doğru alana odaklanır."""
-        if self.fis_turu == "Bankalar Arası Virman":
+        if self.fis_turu in self.TEK_TUTARLI_FIS_TURLERI:
             self.lookup_hedef_banka.ent_display.focus_set()
         else:
             self.lookup_hesap.ent_display.focus_set()
@@ -561,7 +622,7 @@ class BankaFisiFormu(tk.Frame):
         """Fişi kaydeder."""
         fis_turu = self.fis_turu
 
-        if not self.satirlar and fis_turu != "Bankalar Arası Virman":
+        if not self.satirlar and fis_turu not in self.TEK_TUTARLI_FIS_TURLERI:
             messagebox.showwarning("Eksik Bilgi", "Fişe en az bir satır eklemelisiniz.", parent=self)
             return
 
@@ -570,17 +631,17 @@ class BankaFisiFormu(tk.Frame):
             messagebox.showwarning("Eksik Bilgi", "Lütfen bir Ana Banka Hesabı seçin.", parent=self)
             return
 
-        if fis_turu == "Bankalar Arası Virman":
+        if fis_turu in self.TEK_TUTARLI_FIS_TURLERI:
             hedef_banka_id = self.lookup_hedef_banka.get()
             if not hedef_banka_id:
-                messagebox.showwarning("Eksik Bilgi", "Lütfen bir Hedef Banka Hesabı seçin.", parent=self)
+                messagebox.showwarning("Eksik Bilgi", "Lütfen bir karşı hesap seçin.", parent=self)
                 return
-            if self.lookup_hedef_banka.get() == ana_banka_id:
+            if fis_turu == "Bankalar Arası Virman" and self.lookup_hedef_banka.get() == ana_banka_id:
                 messagebox.showwarning("Geçersiz İşlem", "Ana ve hedef banka hesapları aynı olamaz.", parent=self)
                 return
             toplam_tutar = parse_currency(self.ent_virman_tutar.get())
             if toplam_tutar <= 0:
-                messagebox.showwarning("Geçersiz Tutar", "Lütfen 0'dan büyük bir virman tutarı girin.", parent=self)
+                messagebox.showwarning("Geçersiz Tutar", "Lütfen 0'dan büyük bir aktarım tutarı girin.", parent=self)
                 return
         else:
             toplam_tutar = sum(satir['genel_toplam'] for satir in self.satirlar.values())
@@ -597,13 +658,16 @@ class BankaFisiFormu(tk.Frame):
         }
 
         fis_satirlari = []
-        if fis_turu == "Bankalar Arası Virman":
+        if fis_turu in ("Bankalar Arası Virman", "Blokeyi Bankaya Aktar"):
+            is_bloke_aktarim = fis_turu == "Blokeyi Bankaya Aktar"
+            kaynak_aciklama = "POS hesabından banka hesabına aktarım" if is_bloke_aktarim else "banka hesabına virman"
+            hedef_aciklama = "POS hesabından aktarım" if is_bloke_aktarim else "banka hesabından virman"
             fis_satirlari.append({
                 "hesap_turu": "Banka",
                 "hesap_id": ana_banka_id,
                 "borc": 0,
                 "alacak": toplam_tutar,
-                "aciklama": f"ID:{hedef_banka_id} banka hesabına virman",
+                "aciklama": f"ID:{hedef_banka_id} {kaynak_aciklama}",
                 "miktar": 1,
                 "birim_fiyat": toplam_tutar,
                 "kdv_oran": 0,
@@ -614,7 +678,60 @@ class BankaFisiFormu(tk.Frame):
                 "hesap_id": hedef_banka_id,
                 "borc": toplam_tutar,
                 "alacak": 0,
-                "aciklama": f"ID:{ana_banka_id} banka hesabından virman",
+                "aciklama": f"ID:{ana_banka_id} {hedef_aciklama}",
+                "miktar": 1,
+                "birim_fiyat": toplam_tutar,
+                "kdv_oran": 0,
+                "kdv_tutar": 0
+            })
+        elif fis_turu in ("Bankaya Yatan", "Bankadan Çekilen"):
+            # Karşı hesap: yalnızca Kasa (POS işlemleri 'Blokeyi Bankaya Aktar' fişinde)
+            karsi_hesap_id = int(hedef_banka_id)
+            karsi_hesap_turu = "Kasa"
+
+            banka_borclu = fis_turu == "Bankaya Yatan"  # Yatan: bankaya para girer (borç)
+            fis_satirlari.append({
+                "hesap_turu": "Banka",
+                "hesap_id": ana_banka_id,
+                "borc": toplam_tutar if banka_borclu else 0,
+                "alacak": 0 if banka_borclu else toplam_tutar,
+                "aciklama": f"{fis_turu} - karşı hesap ID:{karsi_hesap_id}",
+                "miktar": 1,
+                "birim_fiyat": toplam_tutar,
+                "kdv_oran": 0,
+                "kdv_tutar": 0
+            })
+            fis_satirlari.append({
+                "hesap_turu": karsi_hesap_turu,
+                "hesap_id": karsi_hesap_id,
+                "borc": 0 if banka_borclu else toplam_tutar,
+                "alacak": toplam_tutar if banka_borclu else 0,
+                "aciklama": f"{fis_turu} - banka ID:{ana_banka_id}",
+                "miktar": 1,
+                "birim_fiyat": toplam_tutar,
+                "kdv_oran": 0,
+                "kdv_tutar": 0
+            })
+        elif fis_turu in ("Gelen Banka Transferi", "Giden Banka Transferi"):
+            karsi_hesap_id = int(hedef_banka_id)
+            banka_borclu = fis_turu == "Gelen Banka Transferi"  # Gelen: bankaya para girer (borç)
+            fis_satirlari.append({
+                "hesap_turu": "Banka",
+                "hesap_id": ana_banka_id,
+                "borc": toplam_tutar if banka_borclu else 0,
+                "alacak": 0 if banka_borclu else toplam_tutar,
+                "aciklama": f"{fis_turu} - cari ID:{karsi_hesap_id}",
+                "miktar": 1,
+                "birim_fiyat": toplam_tutar,
+                "kdv_oran": 0,
+                "kdv_tutar": 0
+            })
+            fis_satirlari.append({
+                "hesap_turu": "Cari",
+                "hesap_id": karsi_hesap_id,
+                "borc": 0 if banka_borclu else toplam_tutar,
+                "alacak": toplam_tutar if banka_borclu else 0,
+                "aciklama": f"{fis_turu} - banka ID:{ana_banka_id}",
                 "miktar": 1,
                 "birim_fiyat": toplam_tutar,
                 "kdv_oran": 0,
@@ -696,13 +813,33 @@ class BankaFisiFormu(tk.Frame):
             satirlar = cursor.fetchall()
             satir_cols = [desc[0] for desc in cursor.description]
 
-            if baslik_data['fis_turu'] == "Bankalar Arası Virman":
+            if baslik_data['fis_turu'] in ("Bankalar Arası Virman", "Blokeyi Bankaya Aktar"):
                 for satir in satirlar:
                     satir_data = dict(zip(satir_cols, satir))
                     if satir_data['alacak'] > 0:
                         self.lookup_ana_banka.set(satir_data['hesap_id'])
                     elif satir_data['borc'] > 0:
                         self.lookup_hedef_banka.set(satir_data['hesap_id'])
+                self.ent_virman_tutar.delete(0, tk.END)
+                self.ent_virman_tutar.insert(0, f"{baslik_data['toplam_tutar']:.2f}".replace('.', ','))
+            elif baslik_data['fis_turu'] in ("Bankaya Yatan", "Bankadan Çekilen", "Gelen Banka Transferi", "Giden Banka Transferi"):
+                # Ana hesap (Banka) ile karşı hesabı (Kasa/POS/Cari) ayırt et
+                banka_borclu_mu = baslik_data['fis_turu'] in ("Bankaya Yatan", "Gelen Banka Transferi")
+                ana_satir = None
+                karsi_satir = None
+                for satir in satirlar:
+                    satir_data = dict(zip(satir_cols, satir))
+                    if satir_data['hesap_turu'] == 'Banka' and (
+                        (banka_borclu_mu and satir_data['borc'] > 0) or (not banka_borclu_mu and satir_data['alacak'] > 0)
+                    ):
+                        ana_satir = satir_data
+                    else:
+                        karsi_satir = satir_data
+                if ana_satir:
+                    self.lookup_ana_banka.set(ana_satir['hesap_id'])
+                if karsi_satir:
+                    # Karşı hesap Kasa veya Cari olabilir; ikisi de düz ID ile set edilir
+                    self.lookup_hedef_banka.set(karsi_satir['hesap_id'])
                 self.ent_virman_tutar.delete(0, tk.END)
                 self.ent_virman_tutar.insert(0, f"{baslik_data['toplam_tutar']:.2f}".replace('.', ','))
             else:

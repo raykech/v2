@@ -177,6 +177,14 @@ class AnaPencere(tk.Tk):
                 tab_container.config(bg="#0d6efd")
                 if tab_label: tab_label.config(bg="#0d6efd", fg="white")
                 if close_btn: close_btn.config(bg="#0d6efd", fg="white")
+                # Sekmeye geçildiğinde modül verilerini tazele
+                # (başka bir modülde kaydedilen hareketlerin anında görünmesi için)
+                module_instance = data.get("module_instance")
+                if module_instance is not None and hasattr(module_instance, "yenile"):
+                    try:
+                        module_instance.yenile()
+                    except Exception as e:
+                        print(f"Modül yenileme hatası ({key}): {e}")
             else:
                 data["frame"].pack_forget()
                 tab_container.config(bg="#d7e8ff")
@@ -315,6 +323,19 @@ class AnaPencere(tk.Tk):
         
         # Modülün instance'ına erişip fişi seçme metodunu çağır
         module_instance = self.open_tabs[module_key]["module_instance"]
+
+        # Hedef modülde açık bir form varsa kapat, böylece liste görünümünde seçim yapılabilsin
+        acik_form = getattr(module_instance, "form_instance", None)
+        if acik_form is not None:
+            if hasattr(acik_form, "iptal"):
+                acik_form.iptal()
+            elif hasattr(acik_form, "kapat"):
+                acik_form.kapat()
+            else:
+                acik_form.pack_forget()
+                module_instance.form_kapatildi()
+                module_instance.pack(fill="both", expand=True)
+
         if hasattr(module_instance, "select_and_highlight_fis"):
             module_instance.select_and_highlight_fis(fis_id)
         else:
@@ -332,7 +353,7 @@ class AnaPencere(tk.Tk):
         module_map = {
             "kasa": {"main_path": "modules.kasa.kasa_view", "class_name": "KasaModulu", "dependencies": ["modules.kasa.kasa_form", "core.services", "utils.formatters", "ui.widgets.lookup_widget", "ui.dialogs", "ui.widgets.tooltip", "re"]},
             "tanimlar": {"main_path": "modules.tanimlar.tanimlar_view", "class_name": "TanimlarModulu", "dependencies": ["modules.tanimlar.stok_view", "modules.tanimlar.kasa_view", "modules.tanimlar.cari_view", "modules.tanimlar.hizmet_view", "modules.tanimlar.banka_kurum_view", "modules.tanimlar.banka_hesap_view", "core.services", "utils.formatters", "ui.widgets.lookup_widget", "ui.dialogs", "ui.widgets.tooltip", "re"]},
-            "raporlar": {"main_path": "modules.raporlar.raporlar_view", "class_name": "RaporlarModulu", "dependencies": ["modules.raporlar.hesap_ekstresi_view", "modules.raporlar.stok_durum_raporu_view", "core.services", "utils.formatters", "ui.widgets.lookup_widget", "ui.dialogs", "utils.export", "datetime", "ui.widgets.tooltip"]},
+            "raporlar": {"main_path": "modules.raporlar.raporlar_view", "class_name": "RaporlarModulu", "dependencies": ["modules.raporlar.hesap_ekstresi_view", "modules.raporlar.stok_durum_raporu_view", "modules.raporlar.hizmet_kartlari_raporu_view", "core.services", "utils.formatters", "ui.widgets.lookup_widget", "ui.dialogs", "utils.export", "datetime", "ui.widgets.tooltip"]},
                         "fatura": {"main_path": "modules.fatura.fatura_view", "class_name": "FaturaModulu", "dependencies": ["modules.fatura.fatura_form", "core.services", "utils.formatters", "ui.widgets.lookup_widget", "ui.dialogs", "utils.export", "uuid", "ui.widgets.tooltip", "re"]},
             "cari": {"main_path": "modules.cari.cari_view", "class_name": "CariModulu", "dependencies": ["modules.cari.cari_form", "core.services", "utils.formatters", "ui.widgets.lookup_widget", "ui.dialogs"]},
             "banka": {"main_path": "modules.banka.banka_view", "class_name": "BankaModulu", "dependencies": ["modules.banka.banka_form", "core.services", "utils.formatters", "ui.widgets.lookup_widget", "ui.dialogs"]},

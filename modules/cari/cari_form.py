@@ -15,8 +15,8 @@ class CariFisiFormu(tk.Frame):
     giriş satırı ve kayıt mantığı değişir.
 
     Fiş Türleri:
-    - Alacak Dekontu   : Ana cari ALACAKLI, alt satırlar Gider hizmet kartları BORÇLU
-    - Borç Dekontu     : Ana cari BORÇLU, alt satırlar Gelir hizmet kartları ALACAKLI
+    - Alacak Dekontu   : Üstte tek Gider hizmet kartı BORÇLU, alt satırlar Cariler ALACAKLI (çoklu)
+    - Borç Dekontu     : Üstte tek Gelir hizmet kartı ALACAKLI, alt satırlar Cariler BORÇLU (çoklu)
     - Cari Ödeme       : Cariler BORÇLU, karşı taraf kasa/banka ALACAKLI
     - Cari Tahsilat    : Cariler ALACAKLI, karşı taraf kasa/banka BORÇLU
     - Cari Virman      : Satır bazlı borç/alacak, toplam borç == toplam alacak
@@ -219,20 +219,32 @@ class CariFisiFormu(tk.Frame):
         for child in self.baslik_dinamik_frame.winfo_children():
             child.destroy()
 
-        self.ana_cari_lookup = None
+        self.ana_hesap_lookup = None
         self.odeme_turu_cmb = None
         self.odeme_hesap_lookup = None
         self.odeme_hesap_etiket = None
 
-        if fis_turu in ("Alacak Dekontu", "Borç Dekontu"):
-            etiket = "Alacaklı Cari" if fis_turu == "Alacak Dekontu" else "Borçlu Cari"
+        if fis_turu == "Alacak Dekontu":
+            # Üstte tek Gider kartı (BORÇLU), satırlarda cariler (ALACAKLI)
+            gider_kartlari = {k: v['id'] for k, v in self.hizmet_dict.items() if v['tur'] == 'Gider'}
             self.baslik_dinamik_frame.grid_columnconfigure(1, weight=1)
-            tk.Label(self.baslik_dinamik_frame, text=f"{etiket}:").grid(row=0, column=0, sticky="w")
-            self.ana_cari_lookup = LookupWidget(self.baslik_dinamik_frame)
-            self.ana_cari_lookup.grid(row=0, column=1, padx=5, pady=5, sticky="ew")
-            self.ana_cari_lookup.configure_lookup(
-                title="Cari Seç", data_dict=self.cari_dict,
-                on_new=lambda: self.yeni_kart_ekle("cariler"),
+            tk.Label(self.baslik_dinamik_frame, text="Gider Kartı (Borçlu):").grid(row=0, column=0, sticky="w")
+            self.ana_hesap_lookup = LookupWidget(self.baslik_dinamik_frame)
+            self.ana_hesap_lookup.grid(row=0, column=1, padx=5, pady=5, sticky="ew")
+            self.ana_hesap_lookup.configure_lookup(
+                title="Gider Kartı Seç", data_dict=gider_kartlari,
+                on_new=lambda: self.yeni_kart_ekle("hizmet_kartlari", "Gider"),
+            )
+        elif fis_turu == "Borç Dekontu":
+            # Üstte tek Gelir kartı (ALACAKLI), satırlarda cariler (BORÇLU)
+            gelir_kartlari = {k: v['id'] for k, v in self.hizmet_dict.items() if v['tur'] == 'Gelir'}
+            self.baslik_dinamik_frame.grid_columnconfigure(1, weight=1)
+            tk.Label(self.baslik_dinamik_frame, text="Gelir Kartı (Alacaklı):").grid(row=0, column=0, sticky="w")
+            self.ana_hesap_lookup = LookupWidget(self.baslik_dinamik_frame)
+            self.ana_hesap_lookup.grid(row=0, column=1, padx=5, pady=5, sticky="ew")
+            self.ana_hesap_lookup.configure_lookup(
+                title="Gelir Kartı Seç", data_dict=gelir_kartlari,
+                on_new=lambda: self.yeni_kart_ekle("hizmet_kartlari", "Gelir"),
             )
         elif fis_turu in ("Cari Ödeme", "Cari Tahsilat"):
             self.baslik_dinamik_frame.grid_columnconfigure(2, weight=1)
@@ -279,18 +291,11 @@ class CariFisiFormu(tk.Frame):
     def _giris_satirini_ayarla(self, fis_turu):
         self.lookup_hesap.clear()
 
-        if fis_turu == "Alacak Dekontu":
-            gider_kartlari = {k: v['id'] for k, v in self.hizmet_dict.items() if v['tur'] == 'Gider'}
+        if fis_turu in ("Alacak Dekontu", "Borç Dekontu"):
+            # Satırlar: cariler (Alacak Dekontu'nda alacaklı, Borç Dekontu'nda borçlu)
             self.lookup_hesap.configure_lookup(
-                title="Gider Kartı Seç", data_dict=gider_kartlari,
-                on_new=lambda: self.yeni_kart_ekle("hizmet_kartlari", "Gider"),
-            )
-            self._yon_gorunur(False)
-        elif fis_turu == "Borç Dekontu":
-            gelir_kartlari = {k: v['id'] for k, v in self.hizmet_dict.items() if v['tur'] == 'Gelir'}
-            self.lookup_hesap.configure_lookup(
-                title="Gelir Kartı Seç", data_dict=gelir_kartlari,
-                on_new=lambda: self.yeni_kart_ekle("hizmet_kartlari", "Gelir"),
+                title="Cari Seç", data_dict=self.cari_dict,
+                on_new=lambda: self.yeni_kart_ekle("cariler"),
             )
             self._yon_gorunur(False)
         elif fis_turu in ("Cari Ödeme", "Cari Tahsilat"):
@@ -371,8 +376,7 @@ class CariFisiFormu(tk.Frame):
         self.temizle_giris_satiri()
 
     def _satir_icin_hesap_turu(self):
-        if self.fis_turu in ("Alacak Dekontu", "Borç Dekontu"):
-            return "Hizmet"
+        # Tüm cari fiş türlerinde satırlar caridir
         return "Cari"
 
     def _satir_icin_yon(self):
@@ -545,28 +549,24 @@ class CariFisiFormu(tk.Frame):
 
         # --- Alacak / Borç Dekontu ---
         if fis_turu in ("Alacak Dekontu", "Borç Dekontu"):
-            ana_cari_id = self.ana_cari_lookup.get() if self.ana_cari_lookup else None
-            if not ana_cari_id:
-                messagebox.showwarning("Eksik Bilgi", "Lütfen ana cariyi seçin.", parent=self)
+            ana_hizmet_id = self.ana_hesap_lookup.get() if self.ana_hesap_lookup else None
+            if not ana_hizmet_id:
+                etiket = "gider kartı" if fis_turu == "Alacak Dekontu" else "gelir kartı"
+                messagebox.showwarning("Eksik Bilgi", f"Lütfen {etiket} seçin.", parent=self)
                 return None, 0
 
-            for s in self.satirlar.values():
-                if s['hesap_id'] == ana_cari_id and s['hesap_turu'] == 'Cari':
-                    messagebox.showwarning(
-                        "Uyarı", "Ana cari, alt satırlarda tekrar seçilmemelidir.", parent=self,
-                    )
-                    return None, 0
-
+            # Satırlar: cariler (Alacak Dekontu'nda ALACAKLI, Borç Dekontu'nda BORÇLU)
             satirlar = []
             toplam = 0.0
             for s in self.satirlar.values():
-                satirlar.append(self._satir_dik(s, "Hizmet"))
+                satirlar.append(self._satir_dik(s, "Cari"))
                 toplam += s['tutar']
 
+            # Karşı satır: üstteki tek hizmet kartı
             if fis_turu == "Alacak Dekontu":
-                ana_satir = self._karsi_satir("Cari", ana_cari_id, toplam, self.YON_ALACAK, "Alacak Dekontu")
+                ana_satir = self._karsi_satir("Hizmet", ana_hizmet_id, toplam, self.YON_BORC, "Alacak Dekontu")
             else:
-                ana_satir = self._karsi_satir("Cari", ana_cari_id, toplam, self.YON_BORC, "Borç Dekontu")
+                ana_satir = self._karsi_satir("Hizmet", ana_hizmet_id, toplam, self.YON_ALACAK, "Borç Dekontu")
             satirlar.append(ana_satir)
             return satirlar, toplam
 
@@ -647,7 +647,7 @@ class CariFisiFormu(tk.Frame):
         # Karşıt alanları doldur
         if self.fis_turu in ("Alacak Dekontu", "Borç Dekontu"):
             if karşi_satir:
-                self.ana_cari_lookup.set(karşi_satir['hesap_id'])
+                self.ana_hesap_lookup.set(karşi_satir['hesap_id'])
         elif self.fis_turu in ("Cari Ödeme", "Cari Tahsilat"):
             if karşi_satir:
                 tur = "Kasa" if karşi_satir['hesap_turu'] == "Kasa" else "Banka"
@@ -684,7 +684,7 @@ class CariFisiFormu(tk.Frame):
     def _karsi_satiri_bul(self):
         """Hangi satırın 'karşıt' (ana cari / ödeme kaynağı) olduğunu belirleyen fonksiyon döner."""
         if self.fis_turu in ("Alacak Dekontu", "Borç Dekontu"):
-            return lambda ht, hid: ht == "Cari"
+            return lambda ht, hid: ht == "Hizmet"
         if self.fis_turu in ("Cari Ödeme", "Cari Tahsilat"):
             return lambda ht, hid: ht in ("Kasa", "Banka")
         return None

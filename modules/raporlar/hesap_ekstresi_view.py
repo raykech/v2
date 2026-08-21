@@ -75,8 +75,8 @@ class HesapEkstresiView(tk.Frame):
         self.tree.tag_configure('separator', background='#cccccc')
 
     def _load_filter_data(self):
-        tablo_map = {"Cari": "cariler", "Kasa": "kasalar", "Banka": "banka_hesaplari", "Stok": "stoklar"}
-        ad_kolon_map = {"Cari": "unvan", "Kasa": "kasa_adi", "Banka": "hesap_adi", "Stok": "stok_adi"}
+        tablo_map = {"Cari": "cariler", "Kasa": "kasalar", "Banka": "banka_hesaplari", "Stok": "stoklar", "Hizmet": "hizmet_kartlari"}
+        ad_kolon_map = {"Cari": "unvan", "Kasa": "kasa_adi", "Banka": "hesap_adi", "Stok": "stok_adi", "Hizmet": "kart_adi"}
         tablo_adi = tablo_map.get(self.hesap_turu)
         ad_kolonu = ad_kolon_map.get(self.hesap_turu)
         if not tablo_adi: return
