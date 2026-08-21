@@ -567,6 +567,34 @@ class FaturaFormu(tk.Frame):
             'yil': self.main_app.aktif_yil
         }
 
+                # Fatura satırlarını hazırla
+        fis_satirlari = list(self.satirlar.values())
+
+        # Vadeli faturada cari karşılık satırını ekle
+        if odeme_tipi == "Vadeli" and cari_id:
+            # Satış faturası: cari borçlanır (müşteri bize borçlanır)
+            # Alış faturası: cari alacaklanır (biz tedarikçiye borçlanırız)
+            # Satış İade: cari alacaklanır (müşteriye iade ederiz)
+            # Alış İade: cari borçlanır (tedarikçi bize borçlanır)
+            is_satis = ("Satış Faturası" in self.fis_turu) or ("Hizmet Satış" in self.fis_turu)
+            is_iade = ("İade" in self.fis_turu)
+
+            # Satış (iade değilse) → cari borçlu
+            # Alış iade → cari borçlu
+            cari_borclu = (is_satis and not is_iade) or (not is_satis and is_iade)
+            
+            fis_satirlari.append({
+                'hesap_turu': 'Cari',
+                'hesap_id': cari_id,
+                'borc': genel_toplam if cari_borclu else 0,
+                'alacak': 0 if cari_borclu else genel_toplam,
+                'aciklama': f"{self.fis_turu} cari karşılığı",
+                'miktar': None,
+                'birim_fiyat': None,
+                'kdv_oran': None,
+                'kdv_tutar': None,
+            })
+
         pesin_odeme_data = None
         if odeme_tipi != "Vadeli":
             odeme_hesap_id = self.lookup_odeme_hesap.get()
@@ -599,9 +627,9 @@ class FaturaFormu(tk.Frame):
             conn = veritabani_baglan()
             cursor = conn.cursor()
             if self.fis_id:
-                fis_guncelle(cursor, self.fis_id, fis_data, list(self.satirlar.values()), pesin_odeme_data, kaynak_modul='Fatura')
+                fis_guncelle(cursor, self.fis_id, fis_data, fis_satirlari, pesin_odeme_data, kaynak_modul='Fatura')
             else:
-                fis_kaydet(cursor, fis_data, list(self.satirlar.values()), pesin_odeme_data, kaynak_modul='Fatura')
+                fis_kaydet(cursor, fis_data, fis_satirlari, pesin_odeme_data, kaynak_modul='Fatura')
             conn.commit()
             messagebox.showinfo("Başarılı", "Fatura başarıyla kaydedildi.", parent=self)
             self.kapat()
