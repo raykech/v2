@@ -202,11 +202,13 @@ def tablolari_olustur():
             seri_no TEXT UNIQUE NOT NULL,
             turu TEXT NOT NULL,
             banka TEXT,
+            banka_id INTEGER,
             vade_tarihi TEXT NOT NULL,
             tutar REAL NOT NULL,
             firma_id INTEGER DEFAULT 1,
             created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-            updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+            updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (banka_id) REFERENCES banka_kurumlari(id)
         )
     """
     )

@@ -11,6 +11,7 @@ from modules.raporlar.raporlar_view import RaporlarModulu
 from modules.fatura.fatura_view import FaturaModulu
 from modules.cari.cari_view import CariModulu
 from modules.banka.banka_view import BankaModulu
+from modules.cek_senet.cek_senet_view import CekSenetModulu
 from ui.widgets.tooltip import Tooltip
 
 class AnaPencere(tk.Tk):
@@ -55,6 +56,7 @@ class AnaPencere(tk.Tk):
         moduller_menu.add_command(label="Raporlar", command=lambda: self._modul_aci("raporlar"))
         moduller_menu.add_command(label="Fatura", command=lambda: self._modul_aci("fatura"))
         moduller_menu.add_command(label="Banka", command=lambda: self._modul_aci("banka"))
+        moduller_menu.add_command(label="Çek/Senet", command=lambda: self._modul_aci("cek_senet"))
         menubar.add_cascade(label="Modüller", menu=moduller_menu)
 
     def _modul_butonlari_olustur(self):
@@ -131,6 +133,9 @@ class AnaPencere(tk.Tk):
             module_instance.pack(fill="both", expand=True)
         elif modul_key == "banka":
             module_instance = BankaModulu(tab_frame, self)
+            module_instance.pack(fill="both", expand=True)
+        elif modul_key == "cek_senet":
+            module_instance = CekSenetModulu(tab_frame, self)
             module_instance.pack(fill="both", expand=True)
         else:
             tk.Label(tab_frame, text=f"'{self.module_buttons.get(modul_key)}' modülü henüz oluşturulmadı.", font=("Arial", 18), bg="white").pack(expand=True)
@@ -257,6 +262,11 @@ class AnaPencere(tk.Tk):
                 "dependencies": [
                     "modules.raporlar.hesap_ekstresi_view",
                     "modules.raporlar.stok_durum_raporu_view",
+                    "modules.raporlar.cek_senet_raporlari_view",
+                    "modules.raporlar.cek_senet_portfoy_raporu_view",
+                    "modules.raporlar.cek_senet_vade_raporu_view",
+                    "modules.raporlar.cek_senet_seruven_raporu_view",
+                    "modules.raporlar.cek_senet_cari_raporu_view",
                     "core.services",
                     "utils.formatters",
                     "ui.widgets.lookup_widget",
@@ -307,6 +317,19 @@ class AnaPencere(tk.Tk):
                     "datetime" # Banka formu için
                 ]
             },
+            "cek_senet": {
+                "main_path": "modules.cek_senet.cek_senet_view",
+                "class_name": "CekSenetModulu",
+                "dependencies": [
+                    "modules.cek_senet.cek_senet_form",
+                    "core.services",
+                    "utils.formatters",
+                    "ui.widgets.lookup_widget",
+                    "ui.dialogs",
+                    "ui.widgets.tooltip",
+                    "datetime"
+                ]
+            },
             # Gelecekte diğer modüller buraya eklenebilir
         }
 
@@ -353,10 +376,11 @@ class AnaPencere(tk.Tk):
         module_map = {
             "kasa": {"main_path": "modules.kasa.kasa_view", "class_name": "KasaModulu", "dependencies": ["modules.kasa.kasa_form", "core.services", "utils.formatters", "ui.widgets.lookup_widget", "ui.dialogs", "ui.widgets.tooltip", "re"]},
             "tanimlar": {"main_path": "modules.tanimlar.tanimlar_view", "class_name": "TanimlarModulu", "dependencies": ["modules.tanimlar.stok_view", "modules.tanimlar.kasa_view", "modules.tanimlar.cari_view", "modules.tanimlar.hizmet_view", "modules.tanimlar.banka_kurum_view", "modules.tanimlar.banka_hesap_view", "core.services", "utils.formatters", "ui.widgets.lookup_widget", "ui.dialogs", "ui.widgets.tooltip", "re"]},
-            "raporlar": {"main_path": "modules.raporlar.raporlar_view", "class_name": "RaporlarModulu", "dependencies": ["modules.raporlar.hesap_ekstresi_view", "modules.raporlar.stok_durum_raporu_view", "modules.raporlar.hizmet_kartlari_raporu_view", "core.services", "utils.formatters", "ui.widgets.lookup_widget", "ui.dialogs", "utils.export", "datetime", "ui.widgets.tooltip"]},
+            "raporlar": {"main_path": "modules.raporlar.raporlar_view", "class_name": "RaporlarModulu", "dependencies": ["modules.raporlar.hesap_ekstresi_view", "modules.raporlar.stok_durum_raporu_view", "modules.raporlar.hizmet_kartlari_raporu_view", "modules.raporlar.cek_senet_raporlari_view", "modules.raporlar.cek_senet_portfoy_raporu_view", "modules.raporlar.cek_senet_vade_raporu_view", "modules.raporlar.cek_senet_seruven_raporu_view", "modules.raporlar.cek_senet_cari_raporu_view", "core.services", "utils.formatters", "ui.widgets.lookup_widget", "ui.dialogs", "utils.export", "datetime", "ui.widgets.tooltip"]},
                         "fatura": {"main_path": "modules.fatura.fatura_view", "class_name": "FaturaModulu", "dependencies": ["modules.fatura.fatura_form", "core.services", "utils.formatters", "ui.widgets.lookup_widget", "ui.dialogs", "utils.export", "uuid", "ui.widgets.tooltip", "re"]},
             "cari": {"main_path": "modules.cari.cari_view", "class_name": "CariModulu", "dependencies": ["modules.cari.cari_form", "core.services", "utils.formatters", "ui.widgets.lookup_widget", "ui.dialogs"]},
             "banka": {"main_path": "modules.banka.banka_view", "class_name": "BankaModulu", "dependencies": ["modules.banka.banka_form", "core.services", "utils.formatters", "ui.widgets.lookup_widget", "ui.dialogs"]},
+            "cek_senet": {"main_path": "modules.cek_senet.cek_senet_view", "class_name": "CekSenetModulu", "dependencies": ["modules.cek_senet.cek_senet_form", "core.services", "utils.formatters", "ui.widgets.lookup_widget", "ui.dialogs", "ui.widgets.tooltip", "datetime"]},
             # Gelecekte diğer modüller buraya eklenebilir
         }
 

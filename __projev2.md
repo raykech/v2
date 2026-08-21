@@ -1,177 +1,332 @@
 # Ön Muhasebe v2 - Proje Mimarisi ve Teknik Dokümantasyon
 
-> **ÖNEMLİ NOT:** Artık `v2` klasörü yok. Dosyalar doğrudan ana dizinde (`core/`, `modules/`, `ui/`, `utils/`).
-> Tüm importlar `from core...`, `from modules...`, `from ui...`, `from utils...` şeklinde yapılır.
+> Bu doküman, projenin **güncel** durumunu anlatır.
 > Uygulama `python __main__.py` ile çalıştırılır.
-
-Bu doküman, projenin v2 mimarisinin mevcut teknik yapısını, modüllerini ve temel iş akışlarını anlatır. Amaç, geliştirilen yeni sistemin nasıl çalıştığını açık ve anlaşılır bir şekilde belgelemektir.
+> Veritabanı dosyası: `on_muhasebe.db`
 
 ---
 
 ## 1. Proje Hakkında
 
-Bu proje, Python, Tkinter ve SQLite kullanılarak geliştirilmiş yerel bir ön muhasebe uygulamasının **v2 mimarisidir**. v1'deki tekil işlem mantığından, modern ve esnek bir "çok satırlı fiş" yapısına geçilmiştir.
+Python + Tkinter + SQLite ile geliştirilmiş yerel bir ön muhasebe uygulamasıdır.
+v2 mimarisinde tüm işlemler **çok satırlı fiş** modeli üzerine kurulmuştur.
 
-**v2 Mimarisi Temel Amaçları:**
-- **Fiş/Satır Modeli:** Tüm işlemleri (kasa, fatura vb.) bir başlık ve ona bağlı birden çok detay satırından oluşan fişler olarak yönetmek.
-- **Modüler Dosya Yapısı:** Kod bakımını kolaylaştırmak için her modülü kendi klasörü içinde (`view`, `form` vb.) organize etmek.
-- **Sorumlulukların Ayrılması (SoC):** Veritabanı (`core/db.py`), iş mantığı (`core/services.py`) ve arayüz (`modules/`, `ui/`) katmanlarını net bir şekilde ayırmak.
-- **Sezgisel Kullanıcı Deneyimi:** Excel benzeri satır girişi, dinamik formlar ve gelişmiş filtreleme gibi modern arayüz desenleri kullanmak.
+**Temel amaçlar:**
 
----
-
-## 2. Mimari ve İş Akışı (v2)
-
-### 2.1. Ana Pencere ve Modül Yönetimi (`main_window.py`)
-
-- **Sekmeli Arayüz:** Uygulama, açılan her modülü bir sekme olarak yönetir. Bu, kullanıcının aynı anda birden fazla modülde çalışmasına olanak tanır.
-- **Dinamik Sekme Yönetimi:**
-  - `_modul_aci`: Bir modül ilk kez açıldığında, ilgili `Frame`'i oluşturur ve sekmeler çubuğuna ekler. Zaten açıksa, o sekmeyi öne getirir.
-  - `_tab_ekle`: Sekme çubuğuna modül adını taşıyan bir buton ve bir kapatma ("x") butonu ekler.
-  - `_tab_kapat`: İlgili sekmenin arayüzünü ve referanslarını yok ederek sekmeyi kapatır.
+- Fiş/Satır modeli: Her işlem bir başlık (`fisler`) ve ona bağlı detay satırlarından (`fis_satirlari`) oluşur.
+- Modüler yapı: Her modül `view` (liste) ve `form` (giriş/düzenleme) olarak ayrılır.
+- Katman ayrımı: Veritabanı (`core/db.py`), iş mantığı (`core/services.py`), arayüz (`ui/`, `modules/`).
+- Kaynak takibi: Bir modülde oluşturulan fiş, başka modülde oluşturulmuş bir fişe bağlanabilir.
+- Kullanıcı deneyimi: Excel benzeri satır girişi, dinamik formlar, LookupWidget ile hızlı seçim.
 
 ---
 
-### 2.2. Fiş/Satır Veritabanı Modeli (`core/db.py`)
+## 2. Dizin Yapısı
 
-v2 mimarisi, iki ana tablo üzerine kuruludur:
-
-1.  **`fisler` Tablosu:** İşlemin genel başlık bilgilerini tutar.
-    - **Sütunlar:** `id`, `tarih`, `fis_turu` ('Kasa Gider Fişi' vb.), `fis_no`, `aciklama`, `toplam_tutar`, `kaynak_modul`, `kaynak_fis_id`.
-
-2.  **`fis_satirlari` Tablosu:** Her fişin detay satırlarını (masraf, hizmet, KDV vb.) tutar.
-    - **Sütunlar:** `id`, `fis_id` (ilişki), `hesap_turu` ('Hizmet', 'Kasa'), `hesap_id`, `aciklama`, `borc`, `alacak`, `kdv_oran`, `kdv_tutar`.
-    - Bu yapı, bir fiş altında birden çok kalemin işlenmesine olanak tanır.
-
----
-
-### 2.3. Arayüz Mimarisi ve Bileşenler
-
-- **Liste Ekranları (`..._view.py`):**
-  - Standart yapı: Filtreler + Liste.
-  - Gelişmiş filtreleme: Cari, Tarih Aralığı, Fiş Türü ve genel bir arama kutusu gibi alanlar içerir.
-
-- **Form Ekranları (`..._form.py`):**
-  - Standart yapı: Fiş Başlığı + Satır Giriş Alanı + Satır Listesi + Toplamlar + Kaydet/Kapat Butonları.
-
-- **`LookupWidget` (`lookup_widget.py`):**
-  - "..." butonuna basıldığında arama ve seçim listesi açan, projede sıkça kullanılan bir bileşendir.
-  - "Yeni" butonu ile, bulunduğu yerden ayrılmadan hızlıca yeni bir tanım kartı (stok, cari vb.) eklemeye olanak tanır.
-
----
-
-### 2.4. Temel İş Akışları
-
-#### Fiş Oluşturma ve Düzenleme
-
-- **Dinamik Form Yapısı:** Formlar, `__init__` içinde aldığı `fis_turu` bilgisine göre `ayarla_form_yapisi` metodunu çalıştırır. Örneğin, `fis_turu` "Kasalar Arası Virman" ise, satır listesi gizlenir ve yerine "Hedef Kasa", "Virman Tutarı" gibi özel alanlar gösterilir.
-
-- **Excel-Benzeri Satır Yönetimi:**
-  - **Giriş Satırı:** Satır listesinin hemen üzerinde, veri girişi için ayrılmış sabit bir satır bulunur.
-  - **Ekleme:** Kullanıcı bu satıra bilgileri girip "+" butonuna bastığında, `satir_ekle` metodu çalışır. Bu metot, satırı hem `Treeview` listesine görsel olarak ekler hem de `self.satirlar` sözlüğüne kaydeder.
-  - **Düzenleme (Çift Tıklama):** Kullanıcı listedeki bir satıra çift tıkladığında, o satırın verileri yukarıdaki giriş satırına yüklenir. Değişiklik yapılıp tekrar "+" butonuna basıldığında, yeni bir satır eklemek yerine mevcut satır güncellenir.
-  - **Silme ("X" İkonu):** Her satırın en sağındaki "❌" ikonuna tıklandığında ilgili satır silinir.
-
-- **Anında KDV Güncelleme ve Otomatik Odaklanma:**
-  - `LookupWidget`'tan bir stok/hizmet kartı seçildiği anda, o karta tanımlı KDV oranı **hemen** güncellenir.
-  - Bu işlem için `LookupWidget`'ın `set` metodu "patch"lenerek ve `StringVar`'ın `trace` metodu kullanılarak, değerdeki her değişiklik anında yakalanır.
-  - KDV güncellendikten sonra imleç, veri girişini hızlandırmak için otomatik olarak bir sonraki alan olan "Satır Açıklaması"na geçer.
-
-#### Kaynak Takibi ve "Kaynağa Git" Özelliği
-
-- **Amaç:** Veri bütünlüğünü korumak ve işlemlerin kökenini takip edebilmek.
-- **Mekanizma:** `fisler` tablosundaki `kaynak_modul` ve `kaynak_fis_id` sütunları, bir fişin hangi modül tarafından ve hangi ana fişe bağlı olarak oluşturulduğunu kaydeder. Örneğin, bir faturanın peşin ödemesi, `kaynak_modul='Fatura'` ve `kaynak_fis_id=<fatura_id>` olarak işaretlenmiş bir Kasa fişidir.
-- **Kural:** Bir fiş, yalnızca kendi oluşturulduğu modülden düzenlenebilir ve silinebilir.
-- **Arayüz Davranışı:**
-  - Liste ekranında, başka bir modülden oluşturulmuş bir fiş seçildiğinde "Düzenle" ve "Sil" butonları pasif hale gelir.
-  - "Kaynağa Git" butonu aktifleşir. Bu butona tıklandığında, uygulama kullanıcıyı otomatik olarak kaynak modüle yönlendirir ve ilgili kaynak fişi seçili hale getirir.
-
-#### Tanımlar Arası Senkronizasyon
-
-- Tanımlar modülünde, sekmeler arası geçiş yapıldığında, yeni açılan sekmenin verileri `_on_tab_changed` metodu sayesinde otomatik olarak yenilenir.
-- Bu, bir sekmede eklenen yeni bir tanımın (örn: Banka Kurumu), diğer sekmelerde (örn: Banka Hesapları) anında görünür olmasını sağlar.
+```
+__main__.py                 Uygulama giriş noktası (firma/yıl seçimi + ana pencere)
+core/
+  db.py                     SQLite bağlantısı ve şema kurulumu
+  services.py               Ortak fiş/kart servisleri + çek/senet yardımcıları
+modules/
+  kasa/                     Kasa modülü (view + form)
+  cari/                     Cari modülü
+  banka/                    Banka modülü
+  fatura/                   Fatura modülü
+  cek_senet/                Çek/Senet modülü
+  tanimlar/                 Tanımlar (Stok, Cari, Kasa, Hizmet, Banka)
+  raporlar/                 Raporlar
+ui/
+  main_window.py            Ana pencere, sekmeler, F5 ile yeniden yükleme
+  dialogs.py                Yeni kart ekleme/düzenleme diyalogları
+  widgets/
+    lookup_widget.py        Arama ve seçim bileşeni
+    advanced_treeview.py    Gelişmiş filtreli/sıralamalı Treeview bileşeni
+    tooltip.py              Tooltip bileşeni
+utils/
+  formatters.py             Para/tarih formatlama
+  export.py                 Excel / PDF dışa aktarma
+```
 
 ---
 
-## 3. Mevcut Modüller (v2 Mimarisi)
+## 3. Veritabanı Modeli
 
-- **`core/`**:
-  - `db.py`: Veritabanı bağlantısı ve `tablolari_olustur` ile şema yönetimi.
-  - `services.py`: Merkezi iş mantığı. `fis_kaydet`, `fis_guncelle`, `fis_sil` gibi tüm modüllerin kullanabileceği fonksiyonları barındırır.
+### 3.1. Tanımlama Tabloları
 
-- **`modules/kasa/`**:
-  - `kasa_view.py`: Kasa modülünün ana liste ekranı.
-  - `kasa_form.py`: Kasa fişi ekleme ve düzenleme formu.
+- **stoklar**: `id`, `stok_kodu`, `stok_adi`, `kategori`, `birim`, `alis_fiyati`, `kritik_miktar`, `satis_fiyati`, `kdv_oran`, `firma_id`, `durum`
+- **cariler**: `id`, `unvan`, `tur` (Müşteri/Tedarikçi/Diğer), `telefon`, `firma_id`, `durum`
+- **banka_kurumlari**: `id`, `kurum_adi`, `firma_id`, `durum`
+- **banka_hesaplari**: `id`, `hesap_adi`, `kurum_id`, `hesap_turu` (Vadesiz/POS/Kredi Kartı), `iban`, `komisyon_orani`, `firma_id`, `durum`
+- **kasalar**: `id`, `kasa_adi`, `firma_id`, `durum`
+- **hizmet_kartlari**: `id`, `kart_adi`, `tur` (Gider/Gelir), `kdv_oran`, `grup_id`, `firma_id`, `durum`
+- **hizmet_kartlari_gruplari**: `id`, `grup_adi`, `tur`, `firma_id`, `durum`
+- **genel_tanimlar**: `id`, `grup`, `deger`, `firma_id` (stok kategorisi, stok birimi gibi değerler için)
 
-- **`modules/fatura/`**:
-  - `fatura_view.py`: Fatura modülünün ana liste ekranı.
-  - `fatura_form.py`: Fatura ekleme ve düzenleme formu.
+### 3.2. Fiş Modeli
 
-- **`modules/cari/`**:
-  - `cari_view.py`: Cari modülünün ana liste ekranı.
-  - `cari_form.py`: Cari fişi ekleme ve düzenleme formu.
-  - Fiş Türleri:
-    - Alacak Dekontu (ana cari alacaklı, alt satırlar Gider hizmet kartları borçlu)
-    - Borç Dekontu (ana cari borçlu, alt satırlar Gelir hizmet kartları alacaklı)
-    - Cari Ödeme (cariler borçlu, karşı taraf kasa/banka alacaklı)
-    - Cari Tahsilat (cariler alacaklı, karşı taraf kasa/banka borçlu)
-    - Cari Virman (satır bazlı borç/alacak, toplam borç == toplam alacak)
+**fisler**
 
-- **`modules/banka/`**:
-  - `banka_view.py`: Banka modülünün ana liste ekranı.
-  - `banka_form.py`: Banka fişi ekleme ve düzenleme formu.
-  - Fiş Türleri:
-    - Banka Gider Fişi (Hizmet Gider kartları borçlu, banka hesabı alacaklı)
-    - Banka Tahsil Fişi (Hizmet Gelir kartları alacaklı, banka hesabı borçlu)
-    - Bankalar Arası Virman (ana banka alacaklı, hedef banka borçlu)
+| Kolon | Açıklama |
+|---|---|
+| `id` | Birincil anahtar |
+| `tarih` | İşlem tarihi |
+| `fis_turu` | Fiş türü |
+| `fis_no` | Evrak/fiş numarası |
+| `aciklama` | Genel açıklama |
+| `cari_id` | Faturanın ana carisi gibi opsiyonel başlık carisi |
+| `kaynak_modul` | Fişin hangi modülde oluşturulduğu |
+| `kaynak_fis_id` | Bağlı olduğu kaynak fişin ID'si |
+| `toplam_tutar` | Fiş toplamı |
+| `durum` | 1 aktif, 0 pasif/silindi |
+| `firma_id` | Firma |
+| `yil` | Çalışma yılı |
 
-- **`modules/tanimlar/`**:
-  - `tanimlar_view.py`: Stok, Hizmet, Kasa, Banka, Cari, Banka Kurumları ve Banka Hesapları tanım kartlarının yönetildiği sekmeli ana pencere.
+**fis_satirlari**
 
-- **`modules/raporlar/`**:
-  - `raporlar_view.py`: Raporlar modülünün ana liste ekranı.
-  - `stok_raporu_view.py`, `stok_durum_raporu_view.py`, `hesap_ekstresi_view.py`: Stok ve hesap ekstresi raporları.
+| Kolon | Açıklama |
+|---|---|
+| `id` | Birincil anahtar |
+| `fis_id` | `fisler.id` referansı |
+| `hesap_turu` | `Stok`, `Hizmet`, `Cari`, `Kasa`, `Banka`, `CekSenet` |
+| `hesap_id` | İlgili tanım kartının ID'si |
+| `aciklama` | Satır açıklaması |
+| `miktar` | Miktar |
+| `birim_fiyat` | Birim fiyat |
+| `borc` / `alacak` | Borç ve alacak tutarları |
+| `kdv_oran` / `kdv_tutar` | KDV bilgileri |
+| `firma_id` | Firma |
 
-- **`modules/cek_senet/`**: (Planlanıyor)
-  - `cek_senet_view.py`, `cek_senet_form.py`: Çek/Senet modülü (bkz. `planv2.md`).
+### 3.3. Çek/Senet Modeli
 
-- **`ui/`**:
-  - `main_window.py`: Ana uygulama penceresi, menüler ve sekme yönetimi.
-  - `dialogs.py`: "Yeni Kart Ekle" gibi işlemler için kullanılan diyalog pencereleri.
-  - `widgets/`: `lookup_widget.py` gibi yeniden kullanılabilir arayüz bileşenleri.
+**cekler_senetler**
 
-- **`utils/`**:
-  - `formatters.py`: `format_currency`, `parse_currency` gibi yardımcı formatlama fonksiyonları.
+- `id`, `seri_no`, `turu` (`Çek`/`Senet`), `banka`, `banka_id`, `vade_tarihi`, `tutar`
+- `firma_id`, `created_at`, `updated_at`
+- `kesideci`, `ciranta`, `aciklama`
+
+**cek_senet_hareketleri**
+
+- `id`, `cek_senet_id`, `fis_id`, `islem_tarihi`, `durum`
+- `karsi_hesap_tipi`, `karsi_hesap_id`, `karsi_hesap_ismi`
+- `ilgili_hareket_id`, `aciklama`, `firma_id`, `created_at`
+
+### 3.4. Firma
+
+- **firmalar**: `id`, `firma_adi`, `durum`
 
 ---
 
-## 4. Veritabanı ve Geliştirme Yaklaşımı
+## 4. Ortak İş Mantığı (`core/services.py`)
 
-- **Veritabanı:** Proje, tek bir `on_muhasebe_v2.db` SQLite dosyası kullanır.
-- **Şema Yönetimi:** Geliştirme aşamasında, veritabanı şeması değiştiğinde eski veritabanı dosyası manuel olarak silinir ve `db.py`'nin `tablolari_olustur` fonksiyonu ile yeniden oluşturulur. Bu, geliştirme sürecini hızlandırır.
-- **Veri Bütünlüğü:** İşlemler (kaydetme, silme, güncelleme) `try...except...finally` blokları içinde ve `transaction` (commit/rollback) mantığıyla yönetilir.
+- `fis_kaydet(...)` – Yeni fiş + satırlar + opsiyonel peşin ödeme fişi kaydeder.
+- `fis_guncelle(...)` – Fişi ve satırlarını günceller, eski peşin ödeme fişini siler.
+- `fis_sil(...)` – Fişi ve bağlı satırları siler.
+- `kaydet_kart(...)` / `kart_sil(...)` – Tanım kartlarını ekler/günceller/siler.
+- `is_kart_kullanilmis_mi(...)` – Kartın fişlerde kullanılıp kullanılmadığını kontrol eder.
+- Çek/Senet yardımcıları:
+  - `cek_senet_guncel_durum`
+  - `cek_senet_son_banka_takas`
+  - `cek_senet_fis_son_hareket_mi`
+  - `cek_senet_hareket_ekle`
+  - `cek_senet_fis_sil`
 
 ---
 
-## 5. Son Durum
+## 5. Modüller ve Özellikler
 
-Sistem şu anda v2 mimarisinin temel özelliklerini içeren, çalışan **Kasa, Cari, Banka ve Fatura** modüllerine sahiptir:
-- Firma ve yıl seçimi ile giriş.
-- Sekmeli modül arayüzü ve sekmeleri kapatma.
-- **Kasa ve Banka Modülleri:**
-  - Gelişmiş filtreleme (kasa/banka, tarih aralığı, fiş türü, arama).
-  - Fiş türüne göre (Gider, Tahsil, Virman) dinamik olarak değişen fiş formları.
-  - Excel benzeri arayüz ile çoklu satır ekleme, düzenleme ve silme.
-  - Anında KDV güncelleme ve otomatik odaklanma.
-  - Kaynak takibi ve “Kaynağa Git” özelliği.
-- **Cari Modülü:**
-  - Alacak/Borç Dekontu, Cari Ödeme/Tahsilat, Cari Virman fiş türleri.
-  - Ödeme türüne göre (Kasa/Banka) otomatik karşıt hesap seçimi.
-  - Satır bazlı borç/alacak yönetimi ve virman denge kontrolü.
-  - Kaynak takibi ve “Kaynağa Git” özelliği.
-- **Fatura Modülü:** Satış ve Alış faturaları, peşin/tahsilatlı ödeme yönetimi.
-- **Tanımlar Modülü:**
-  - Stok, Hizmet, Kasa, Banka, Cari kart tanımları.
-  - Sekmeler arası otomatik veri yenileme.
+### 5.1. Kasa
 
-Bu yapı, Çek/Senet modülünün de aynı sağlam temeller üzerinde hızla geliştirilmesi için bir şablon oluşturmaktadır.
+Fiş türleri:
+- Kasa Gider Fişi
+- Kasa Gelir Fişi
+- Kasalar Arası Virman
+
+Özellikler:
+- Gider/Gelir fişlerinde Hizmet kartı satırları + Kasa karşı satırı
+- Virman fişinde satır listesi gizlenir; kaynak kasa, hedef kasa ve tutar alanları kullanılır
+- KDV otomatik dolum ve anında satır toplamı hesabı
+
+### 5.2. Banka
+
+Fiş türleri:
+- Banka Gider Fişi
+- Banka Gelir Fişi
+- Bankalar Arası Virman
+- Blokeyi Bankaya Aktar
+- Bankaya Yatan
+- Bankadan Çekilen
+- Gelen Banka Transferi
+- Giden Banka Transferi
+
+Özellikler:
+- Gider/Gelir fişlerinde Hizmet kartı satırları + Banka karşı satırı
+- Virman ve transfer türlerinde tek tutarlı özel form
+- POS hesapları ile normal banka hesapları ayrıştırılır
+- Bankaya Yatan / Bankadan Çekilen işlemlerinde karşı hesap Kasa'dır
+- Gelen/Giden Transfer işlemlerinde karşı hesap Cari'dir
+
+### 5.3. Cari
+
+Fiş türleri:
+- Alacak Dekontu
+- Borç Dekontu
+- Cari Ödeme
+- Cari Tahsilat
+- Cari Virman
+
+Özellikler:
+- Alacak/Borç Dekontu: üstte tek Gider/Gelir kartı, satırlarda Cariler
+- Cari Ödeme/Tahsilat: ödeme türü Kasa veya Banka
+- Cari Virman: satır bazlı borç/alacak, toplam borç = toplam alacak zorunluluğu
+
+### 5.4. Fatura
+
+Fiş türleri:
+- Satış Faturası
+- Alış Faturası
+- Satış İade Faturası
+- Alış İade Faturası
+- Hizmet Satış Faturası
+- Hizmet Alış Faturası
+
+Ödeme tipleri:
+- Vadeli
+- Nakit (Kasa)
+- Banka
+- POS
+
+Özellikler:
+- Stoklu ve hizmetli fatura desteği
+- İade faturalarında borç/alacak yönü otomatik ters çevrilir
+- Peşin ödemelerde `kaynak_modul='Fatura'` ve `kaynak_fis_id=<fatura_id>` ile bağlı Kasa/Banka fişi oluşturulur
+- KDV otomatik dolum ve satır toplamı hesabı
+
+### 5.5. Çek/Senet
+
+Fiş türleri:
+- Çek/Senet Giriş Fişi
+- Çek/Senet Bankaya Tahsile Verme
+- Çek/Senet Ciro Etme
+- Çek/Senet Tahsil Fişi
+- Çek/Senet İade Fişi
+
+Durumlar:
+- Portföyde
+- Bankada Tahsilde
+- Cirolu
+- Tahsil Edildi
+- İade Edildi
+
+Durum akışı:
+
+```
+Giriş Fişi
+   ↓
+Portföyde ──→ Bankaya Tahsile Verme → Bankada Tahsilde → Tahsil Fişi → Tahsil Edildi
+   │
+   ├──→ Ciro Etme → Cirolu
+   └──→ İade Fişi → İade Edildi
+```
+
+Kurallar:
+- Giriş Fişi yeni çek/senet kartı oluşturur.
+- Diğer fişler yalnızca uygun durumdaki çek/senetleri seçebilir.
+- Tahsil fişinde tüm satırlar aynı durumda olmalıdır.
+- Bir fiş, ilgili çek/senedin son hareketi değilse düzenlenemez/silinemez.
+
+### 5.6. Tanımlar
+
+- Stok Kartları
+- Cari Kartları
+- Kasa Kartları
+- Hizmet Kartları (Gider/Gelir + Grup)
+- Banka Hesapları
+- Banka Kurumları
+
+Tanımlar sekmeler arası geçişte otomatik yenilenir.
+
+### 5.7. Raporlar
+
+Rapor sekmeleri:
+- Stok Durum Raporu
+- Stok Ekstresi
+- Cari Ekstre
+- Kasa Ekstre
+- Banka Ekstre
+- Hizmet Kartları Raporu
+- Hizmet Kartları Detay
+
+Raporlar **Excel (.xlsx)** ve **PDF** olarak dışa aktarılabilir.
+
+---
+
+## 6. Kullanıcı Arayüzü ve Deneyim
+
+### 6.1. Ana Pencere
+
+- Firma ve yıl seçimi ile giriş yapılır.
+- Modüller sekmeler hâlinde açılır.
+- Sekmeler arası geçişte aktif modül otomatik yenilenir.
+- Geliştirme sırasında **F5** ile aktif modül ve bağımlılıkları yeniden yüklenir.
+
+### 6.2. LookupWidget
+
+- `...` butonu ile arama diyaloğu açılır.
+- Yeni kart ekleme, düzenleme ve silme işlemleri diyalog içinden yapılabilir.
+- Seçim sonrası otomatik KDV dolumu ve odaklanma davranışları tetiklenebilir.
+
+### 6.3. Dinamik Formlar
+
+- Fiş türüne göre form yapısı değişir.
+- Virman/transfer türlerinde satır listesi gizlenir, yerine kaynak-hedef-tutar alanları gelir.
+- Excel benzeri giriş satırı, çift tıklama ile düzenleme, `X` ile satır silme.
+- CurrencyFormatter ile para girişleri otomatik formatlanır.
+
+### 6.4. Kaynak Takibi ve "Kaynağa Git"
+
+- Bir fiş başka modülden oluşturulduysa:
+  - Düzenle ve Sil butonları pasif olur.
+  - Kaynağa Git butonu aktifleşir.
+- Örnek: Fatura peşin tahsilatı, `kaynak_modul='Fatura'` olan bir Kasa/Banka fişi oluşturur. Kasa listesinde bu fiş seçildiğinde kullanıcı "Kaynağa Git" ile faturaya dönebilir.
+
+---
+
+## 7. Kurulum ve Çalıştırma
+
+```bash
+pip install tkcalendar pandas openpyxl reportlab
+python __main__.py
+```
+
+- `tkcalendar`: tarih seçici
+- `pandas` + `openpyxl`: Excel dışa aktarma
+- `reportlab`: PDF dışa aktarma
+
+Veritabanı `core/db.py` çalıştırıldığında `on_muhasebe.db` olarak otomatik oluşturulur.
+
+---
+
+## 8. Geliştirme Notları / Kurallar
+
+1. `iptal()` metodunda `self.destroy()` kullanılmaz; `pack_forget()` + `on_close()` + `view_container.pack()` kullanılır.
+2. `main_window.py` içinde `_yeniden_yukle_aktif_modul` metodu ve `module_map` iki yerde bulunur; yeni modül eklerken ikisine de ekleme yapılmalıdır.
+3. Lookup widget'ları `verileri_yukle()` ve `ayarla_form_yapisi()` çağrılarından sonra yapılandırılmalıdır.
+4. Yeni kart ekleme işlemlerinde `ui/dialogs.py` içindeki `ac_kart_dialog` kullanılır.
+5. Tüm kayıtlarda `firma_id` ve `yil` bilgisi korunmalıdır.
+6. Çek/Senet seçimlerinde LookupWidget'tan dönen ID string olabilir; veri sözlüğü anahtarları integer olduğundan `int()` çevrimi yapılmalıdır.
+
+---
+
+## 9. Güncel Durum
+
+Tamamlanan modüller:
+- Kasa
+- Banka
+- Cari
+- Fatura
+- Çek/Senet
+- Tanımlar
+- Raporlar
+
+Uygulama, tek kullanıcılı yerel ön muhasebe işlemlerini fiş bazlı olarak yönetebilecek durumdadır.
