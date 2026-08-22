@@ -756,7 +756,7 @@ class CekSenetFisiFormu(tk.Frame):
             "toplam_tutar": 0.0,
             "cari_id": None,
             "firma_id": firma_id,
-            "yil": self.main_app.aktif_yil,
+            "yil": self.ent_tarih.get_date().year,
         }
 
         fis_satirlari = []

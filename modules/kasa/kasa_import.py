@@ -555,7 +555,7 @@ def kasa_import_dogrula(satirlar, firma_id, aktif_yil):
             "toplam_tutar": grup["toplam_tutar"],
             "cari_id": None,
             "firma_id": firma_id,
-            "yil": aktif_yil,
+            "yil": int(tarih[:4]),
         }
 
         hazir_fisler.append({

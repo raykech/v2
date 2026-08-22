@@ -603,7 +603,7 @@ class KasaFisiFormu(tk.Frame):
             "toplam_tutar": toplam_tutar,
             "cari_id": None,
             "firma_id": self.main_app.aktif_firma_id,
-            "yil": self.main_app.aktif_yil
+            "yil": self.ent_tarih.get_date().year
         }
 
         fis_satirlari = []

@@ -1,8 +1,15 @@
 import tkinter as tk
-from tkinter import ttk, messagebox
+from tkinter import ttk, messagebox, filedialog
 from tkcalendar import DateEntry
 from datetime import datetime
 from modules.banka.banka_form import BankaFisiFormu
+from modules.banka.banka_import import (
+    banka_ornek_excel_olustur,
+    banka_excel_oku,
+    banka_import_dogrula,
+    banka_fislerini_kaydet,
+)
+from ui.import_preview import BankaImportPreviewDialog
 from modules.acilis.acilis_form import AcilisFisiFormu
 from core.db import veritabani_baglan
 from ui.widgets.tooltip import Tooltip
@@ -47,6 +54,26 @@ class BankaModulu(tk.Frame):
             ust_frame, text="Yeni ▼", font=("Arial", 9, "bold"), padx=10, pady=4,
         )
         self.btn_yeni.pack(side="left", padx=(0, 10))
+
+        self.btn_ornek_indir = tk.Button(
+            ust_frame,
+            text="Örnek İndir",
+            command=self.ornek_indir,
+            font=("Arial", 9, "bold"),
+            padx=10,
+            pady=4,
+        )
+        self.btn_ornek_indir.pack(side="left", padx=(0, 10))
+
+        self.btn_veri_yukle = tk.Button(
+            ust_frame,
+            text="Veri Yükle",
+            command=self.veri_yukle,
+            font=("Arial", 9, "bold"),
+            padx=10,
+            pady=4,
+        )
+        self.btn_veri_yukle.pack(side="left", padx=(0, 10))
 
         self.yeni_fis_menu = tk.Menu(self.btn_yeni, tearoff=0)
         self.btn_yeni["menu"] = self.yeni_fis_menu
@@ -173,6 +200,11 @@ class BankaModulu(tk.Frame):
 
         bas_tarih = self.ent_bas_tarih_filtre.get_date().strftime("%Y-%m-%d")
         bit_tarih = self.ent_bit_tarih_filtre.get_date().strftime("%Y-%m-%d")
+        # Tarih aralığını aktif yılın sınırlarına göre kısıtla
+        yil_bas = f"{self.main_app.aktif_yil}-01-01"
+        yil_bit = f"{self.main_app.aktif_yil}-12-31"
+        if bas_tarih < yil_bas: bas_tarih = yil_bas
+        if bit_tarih > yil_bit: bit_tarih = yil_bit
         where_clauses.append("f.tarih BETWEEN ? AND ?")
         params.extend([bas_tarih, bit_tarih])
 
@@ -231,6 +263,99 @@ class BankaModulu(tk.Frame):
         self.cmb_fis_turu_filtre.set("Tümü")
         self.ent_arama.delete(0, tk.END)
         self.listele()
+
+    def ornek_indir(self):
+        """Örnek Excel import şablonunu indirir."""
+        dosya_yolu = filedialog.asksaveasfilename(
+            title="Örnek Excel Şablonunu Kaydet",
+            defaultextension=".xlsx",
+            filetypes=[("Excel Dosyası", "*.xlsx")],
+            initialfile="banka_import_ornek.xlsx",
+            parent=self,
+        )
+        if not dosya_yolu:
+            return
+        try:
+            banka_ornek_excel_olustur(dosya_yolu)
+            messagebox.showinfo("Başarılı", "Örnek Excel dosyası oluşturuldu.\nDoldurup tekrar Veri Yükle ile içe aktarabilirsiniz.", parent=self)
+        except Exception as e:
+            messagebox.showerror("Excel Oluşturma Hatası", f"Örnek dosya oluşturulamadı:\n{e}", parent=self)
+
+    def veri_yukle(self):
+        """Excel dosyasını okur, doğrular ve önizleme sonrası içe aktarır."""
+        try:
+            self._veri_yukle_impl()
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            messagebox.showerror("Veri Yükleme Hatası", f"Beklenmeyen bir hata oluştu:\n{e}", parent=self)
+
+    def _veri_yukle_impl(self):
+        dosya_yolu = filedialog.askopenfilename(
+            title="Banka Excel Dosyası Seç",
+            filetypes=[("Excel Dosyası", "*.xlsx *.xls")],
+            parent=self,
+        )
+        if not dosya_yolu:
+            return
+
+        try:
+            satirlar = banka_excel_oku(dosya_yolu)
+            hazir_fisler, hatalar, uyarilar = banka_import_dogrula(
+                satirlar,
+                self.main_app.aktif_firma_id,
+                self.main_app.aktif_yil,
+            )
+        except Exception as e:
+            messagebox.showerror("Excel Okuma Hatası", f"Dosya okunurken bir hata oluştu:\n{e}", parent=self)
+            return
+
+        if not hazir_fisler and not hatalar:
+            messagebox.showinfo("Bilgi", "Aktarılacak veri bulunamadı.\nExcel dosyası boş olabilir veya satırlar silinmiş olabilir.", parent=self)
+            return
+
+        import_basarili = False
+
+        def import_callback():
+            nonlocal import_basarili
+            conn = None
+            try:
+                conn = veritabani_baglan()
+                cursor = conn.cursor()
+                eklenen_ids = banka_fislerini_kaydet(cursor, hazir_fisler, self.main_app.aktif_firma_id, self.main_app.aktif_yil)
+                conn.commit()
+                import_basarili = True
+                fis_nolar = [f.get("fis_no") or "(boş)" for f in hazir_fisler]
+                mesaj = f"{len(eklenen_ids)} fiş başarıyla içe aktarıldı.\nFiş No: {', '.join(fis_nolar)}"
+                messagebox.showinfo("Başarılı", mesaj, parent=self)
+                return True
+            except Exception as e:
+                if conn:
+                    conn.rollback()
+                messagebox.showerror("İçe Aktarma Hatası", f"Fişler kaydedilirken bir hata oluştu:\n{e}", parent=self)
+                return False
+            finally:
+                if conn:
+                    conn.close()
+
+        try:
+            BankaImportPreviewDialog(
+                self,
+                "Banka İçe Aktarma Önizleme",
+                hazir_fisler,
+                hatalar,
+                uyarilar,
+                on_import=import_callback,
+            )
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            messagebox.showerror("Önizleme Hatası", f"Önizleme ekranı açılırken bir hata oluştu:\n{e}", parent=self)
+
+        if import_basarili:
+            self.filtreleri_temizle()
+        else:
+            self.listele()
 
     def _ac_yeni_fis_formu(self, fis_turu):
         self.pack_forget()

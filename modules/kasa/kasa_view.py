@@ -199,6 +199,11 @@ class KasaModulu(tk.Frame):
         # Date range filter
         bas_tarih = self.ent_bas_tarih_filtre.get_date().strftime("%Y-%m-%d")
         bit_tarih = self.ent_bit_tarih_filtre.get_date().strftime("%Y-%m-%d")
+        # Tarih aralığını aktif yılın sınırlarına göre kısıtla
+        yil_bas = f"{self.main_app.aktif_yil}-01-01"
+        yil_bit = f"{self.main_app.aktif_yil}-12-31"
+        if bas_tarih < yil_bas: bas_tarih = yil_bas
+        if bit_tarih > yil_bit: bit_tarih = yil_bit
         where_clauses.append("f.tarih BETWEEN ? AND ?")
         params.extend([bas_tarih, bit_tarih])
 

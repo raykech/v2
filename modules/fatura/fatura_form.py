@@ -564,7 +564,7 @@ class FaturaFormu(tk.Frame):
             'cari_id': cari_id,
             'toplam_tutar': genel_toplam,
             'firma_id': self.main_app.aktif_firma_id,
-            'yil': self.main_app.aktif_yil
+            'yil': self.ent_tarih.get_date().year
         }
 
                 # Fatura satırlarını hazırla

@@ -1,9 +1,16 @@
 import tkinter as tk
-from tkinter import ttk, messagebox
+from tkinter import ttk, messagebox, filedialog
 from tkcalendar import DateEntry
 from datetime import datetime
 import re # Kaynak modül ayrıştırması için eklendi
 from modules.fatura.fatura_form import FaturaFormu
+from modules.fatura.fatura_import import (
+    fatura_ornek_excel_olustur,
+    fatura_excel_oku,
+    fatura_import_dogrula,
+    fatura_fislerini_kaydet,
+)
+from ui.import_preview import FaturaImportPreviewDialog
 from core.db import veritabani_baglan
 from ui.widgets.tooltip import Tooltip # Tooltip için eklendi
 from utils.formatters import format_date, format_currency
@@ -31,6 +38,26 @@ class FaturaModulu(tk.Frame):
 
         self.btn_yeni = tk.Menubutton(ust_frame, text="Yeni ▼", font=("Arial", 9, "bold"), padx=10, pady=4)
         self.btn_yeni.pack(side="left", padx=(0, 10))
+
+        self.btn_ornek_indir = tk.Button(
+            ust_frame,
+            text="Örnek İndir",
+            command=self.ornek_indir,
+            font=("Arial", 9, "bold"),
+            padx=10,
+            pady=4,
+        )
+        self.btn_ornek_indir.pack(side="left", padx=(0, 10))
+
+        self.btn_veri_yukle = tk.Button(
+            ust_frame,
+            text="Veri Yükle",
+            command=self.veri_yukle,
+            font=("Arial", 9, "bold"),
+            padx=10,
+            pady=4,
+        )
+        self.btn_veri_yukle.pack(side="left", padx=(0, 10))
         self.yeni_fis_menu = tk.Menu(self.btn_yeni, tearoff=0)
         self.btn_yeni["menu"] = self.yeni_fis_menu
         self.yeni_fis_menu.add_command(label="Satış Faturası", command=lambda: self._ac_yeni_form("Satış Faturası"))
@@ -132,8 +159,15 @@ class FaturaModulu(tk.Frame):
         where_clauses = ["f.firma_id=? AND f.yil=? AND f.fis_turu LIKE '%Faturası'"]
         params = [self.main_app.aktif_firma_id, self.main_app.aktif_yil]
         
+        bas_tarih = self.ent_bas_tarih.get_date().strftime("%Y-%m-%d")
+        bit_tarih = self.ent_bit_tarih.get_date().strftime("%Y-%m-%d")
+        # Tarih aralığını aktif yılın sınırlarına göre kısıtla
+        yil_bas = f"{self.main_app.aktif_yil}-01-01"
+        yil_bit = f"{self.main_app.aktif_yil}-12-31"
+        if bas_tarih < yil_bas: bas_tarih = yil_bas
+        if bit_tarih > yil_bit: bit_tarih = yil_bit
         where_clauses.append("f.tarih BETWEEN ? AND ?")
-        params.extend([self.ent_bas_tarih.get_date().strftime("%Y-%m-%d"), self.ent_bit_tarih.get_date().strftime("%Y-%m-%d")])
+        params.extend([bas_tarih, bit_tarih])
 
         if self.cmb_cari_filtre.get() != "Tüm Cariler":
             cari_id = self.cari_dict.get(self.cmb_cari_filtre.get())
@@ -172,6 +206,99 @@ class FaturaModulu(tk.Frame):
         self.cmb_tur_filtre.set("Tümü")
         self.ent_arama.delete(0, tk.END)
         self.listele()
+
+    def ornek_indir(self):
+        """Örnek Excel import şablonunu indirir."""
+        dosya_yolu = filedialog.asksaveasfilename(
+            title="Örnek Excel Şablonunu Kaydet",
+            defaultextension=".xlsx",
+            filetypes=[("Excel Dosyası", "*.xlsx")],
+            initialfile="fatura_import_ornek.xlsx",
+            parent=self,
+        )
+        if not dosya_yolu:
+            return
+        try:
+            fatura_ornek_excel_olustur(dosya_yolu)
+            messagebox.showinfo("Başarılı", "Örnek Excel dosyası oluşturuldu.\nDoldurup tekrar Veri Yükle ile içe aktarabilirsiniz.", parent=self)
+        except Exception as e:
+            messagebox.showerror("Excel Oluşturma Hatası", f"Örnek dosya oluşturulamadı:\n{e}", parent=self)
+
+    def veri_yukle(self):
+        """Excel dosyasını okur, doğrular ve önizleme sonrası içe aktarır."""
+        try:
+            self._veri_yukle_impl()
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            messagebox.showerror("Veri Yükleme Hatası", f"Beklenmeyen bir hata oluştu:\n{e}", parent=self)
+
+    def _veri_yukle_impl(self):
+        dosya_yolu = filedialog.askopenfilename(
+            title="Fatura Excel Dosyası Seç",
+            filetypes=[("Excel Dosyası", "*.xlsx *.xls")],
+            parent=self,
+        )
+        if not dosya_yolu:
+            return
+
+        try:
+            satirlar = fatura_excel_oku(dosya_yolu)
+            hazir_faturalar, hatalar, uyarilar = fatura_import_dogrula(
+                satirlar,
+                self.main_app.aktif_firma_id,
+                self.main_app.aktif_yil,
+            )
+        except Exception as e:
+            messagebox.showerror("Excel Okuma Hatası", f"Dosya okunurken bir hata oluştu:\n{e}", parent=self)
+            return
+
+        if not hazir_faturalar and not hatalar:
+            messagebox.showinfo("Bilgi", "Aktarılacak veri bulunamadı.\nExcel dosyası boş olabilir veya satırlar silinmiş olabilir.", parent=self)
+            return
+
+        import_basarili = False
+
+        def import_callback():
+            nonlocal import_basarili
+            conn = None
+            try:
+                conn = veritabani_baglan()
+                cursor = conn.cursor()
+                eklenen_ids = fatura_fislerini_kaydet(cursor, hazir_faturalar, self.main_app.aktif_firma_id, self.main_app.aktif_yil)
+                conn.commit()
+                import_basarili = True
+                fis_nolar = [f.get("fis_no") or "(boş)" for f in hazir_faturalar]
+                mesaj = f"{len(eklenen_ids)} fatura başarıyla içe aktarıldı.\nFatura No: {', '.join(fis_nolar)}"
+                messagebox.showinfo("Başarılı", mesaj, parent=self)
+                return True
+            except Exception as e:
+                if conn:
+                    conn.rollback()
+                messagebox.showerror("İçe Aktarma Hatası", f"Faturalar kaydedilirken bir hata oluştu:\n{e}", parent=self)
+                return False
+            finally:
+                if conn:
+                    conn.close()
+
+        try:
+            FaturaImportPreviewDialog(
+                self,
+                "Fatura İçe Aktarma Önizleme",
+                hazir_faturalar,
+                hatalar,
+                uyarilar,
+                on_import=import_callback,
+            )
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            messagebox.showerror("Önizleme Hatası", f"Önizleme ekranı açılırken bir hata oluştu:\n{e}", parent=self)
+
+        if import_basarili:
+            self.filtreleri_temizle()
+        else:
+            self.listele()
 
     def _ac_yeni_form(self, fis_turu):
         self.pack_forget()

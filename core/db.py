@@ -1,8 +1,7 @@
 import sqlite3
 import os
 
-# GUVENLIK-03: Veritabanı yolunu programın çalıştığı dizine göre değil,
-# bu dosyanın bulunduğu konuma göre ayarla.
+# Veritabanı yolunu bu dosyanın bulunduğu konuma göre ayarla
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DB_YOLU = os.path.join(BASE_DIR, "on_muhasebe.db")
 
@@ -16,13 +15,12 @@ def veritabani_baglan():
 def tablolari_olustur():
     """
     Uygulamanın v2 mimarisi için gerekli tüm tabloları kurar.
-    Eski 'hareketler' ve 'hareket_baglantilari' tabloları yerine
-    'fisler' ve 'fis_satirlari' tabloları kullanılır.
+    Geliştirme aşaması sonrası temiz şema — ALTER TABLE / migrasyon içermez.
     """
     conn = veritabani_baglan()
     cursor = conn.cursor()
 
-    # --- TANIMLAMA TABLOLARI (v1'den taşındı) ---
+    # --- TANIMLAMA TABLOLARI ---
     cursor.execute(
         """
         CREATE TABLE IF NOT EXISTS stoklar (
@@ -40,11 +38,6 @@ def tablolari_olustur():
         )
         """
     )
-    # kdv_oran sütununu ekle (eğer yoksa)
-    cursor.execute("PRAGMA table_info(stoklar)")
-    columns = [col[1] for col in cursor.fetchall()]
-    if 'kdv_oran' not in columns:
-        cursor.execute("ALTER TABLE stoklar ADD COLUMN kdv_oran REAL DEFAULT 20")
 
     cursor.execute(
         """
@@ -58,6 +51,7 @@ def tablolari_olustur():
         )
         """
     )
+
     cursor.execute(
         """
         CREATE TABLE IF NOT EXISTS banka_kurumlari (
@@ -68,6 +62,7 @@ def tablolari_olustur():
         )
         """
     )
+
     cursor.execute(
         """
         CREATE TABLE IF NOT EXISTS banka_hesaplari (
@@ -83,6 +78,7 @@ def tablolari_olustur():
         )
         """
     )
+
     cursor.execute(
         """
         CREATE TABLE IF NOT EXISTS kasalar (
@@ -93,6 +89,7 @@ def tablolari_olustur():
         )
         """
     )
+
     cursor.execute(
         """
         CREATE TABLE IF NOT EXISTS hizmet_kartlari (
@@ -100,27 +97,19 @@ def tablolari_olustur():
             kart_adi TEXT NOT NULL,
             tur TEXT DEFAULT 'Gider',
             kdv_oran REAL DEFAULT 20,
+            grup_id INTEGER,
             firma_id INTEGER DEFAULT 1,
             durum INTEGER DEFAULT 1
         )
         """
     )
-    # kdv_oran sütununu ekle (eğer yoksa)
-    cursor.execute("PRAGMA table_info(hizmet_kartlari)")
-    columns = [col[1] for col in cursor.fetchall()]
-    if 'kdv_oran' not in columns:
-        cursor.execute("ALTER TABLE hizmet_kartlari ADD COLUMN kdv_oran REAL DEFAULT 20")
-    # grup_id sütununu ekle (eğer yoksa)
-    if 'grup_id' not in columns:
-        cursor.execute("ALTER TABLE hizmet_kartlari ADD COLUMN grup_id INTEGER")
 
-    # Hizmet Kartları Grupları tablosu (mizan için ana hesap grubu)
     cursor.execute(
         """
         CREATE TABLE IF NOT EXISTS hizmet_kartlari_gruplari (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             grup_adi TEXT NOT NULL,
-            tur TEXT NOT NULL DEFAULT 'Gider',   -- 'Gider' / 'Gelir'
+            tur TEXT NOT NULL DEFAULT 'Gider',
             firma_id INTEGER DEFAULT 1,
             durum INTEGER DEFAULT 1,
             UNIQUE(grup_adi, tur, firma_id)
@@ -139,40 +128,27 @@ def tablolari_olustur():
         """
     )
 
-    # 1. Fişler Tablosu (Eski 'hareketler' tablosunun sadeleştirilmiş hali)
-    # Sadece işlemin başlık bilgilerini tutar.
+    # --- FİŞLER TABLOSU ---
     cursor.execute(
         """
         CREATE TABLE IF NOT EXISTS fisler (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             tarih TEXT NOT NULL,
-            fis_turu TEXT NOT NULL,          -- 'Satış Faturası', 'Kasa Gider Fişi', 'Banka Transfer' vb.
-            fis_no TEXT DEFAULT '',          -- Evrak No / Fatura No
-            aciklama TEXT DEFAULT '',         -- Fiş geneli için kullanıcı açıklaması
-            cari_id INTEGER,                 -- Faturanın ana carisi gibi, başlıkta tutulabilir (opsiyonel)
-            kaynak_modul TEXT,               -- Fişin hangi modül tarafından oluşturulduğu (örn: 'Kasa', 'Fatura')
-            kaynak_fis_id INTEGER,           -- Faturanın peşin ödeme fişini bağlamak için
+            fis_turu TEXT NOT NULL,
+            fis_no TEXT DEFAULT '',
+            aciklama TEXT DEFAULT '',
+            cari_id INTEGER,
+            kaynak_modul TEXT,
+            kaynak_fis_id INTEGER,
             toplam_tutar REAL DEFAULT 0,
-            durum INTEGER DEFAULT 1,         -- 1: Aktif, 0: İptal/Silinmiş
+            durum INTEGER DEFAULT 1,
             firma_id INTEGER NOT NULL,
             yil INTEGER NOT NULL
         )
         """
     )
-    # fisler tablosuna kaynak_modul sütununu ekle (eğer yoksa)
-    cursor.execute("PRAGMA table_info(fisler)")
-    columns = [col[1] for col in cursor.fetchall()]
-    if 'kaynak_modul' not in columns:
-        cursor.execute("ALTER TABLE fisler ADD COLUMN kaynak_modul TEXT")
-    # fisler tablosuna kaynak_fis_id sütununu ekle (eğer yoksa)
-    cursor.execute("PRAGMA table_info(fisler)")
-    columns = [col[1] for col in cursor.fetchall()]
-    if 'kaynak_fis_id' not in columns:
-        cursor.execute("ALTER TABLE fisler ADD COLUMN kaynak_fis_id INTEGER")
-    
 
-    # 2. Fiş Satırları Tablosu (Eski 'hareket_baglantilari' tablosunun yeni hali)
-    # Her fişin altındaki detay satırlarını (stok, masraf vb.) tutar.
+    # --- FİŞ SATIRLARI TABLOSU ---
     cursor.execute(
         """
         CREATE TABLE IF NOT EXISTS fis_satirlari (
@@ -193,8 +169,7 @@ def tablolari_olustur():
         """
     )
 
-    # --- ÇEK/SENET TABLOLARI (Değişiklik yok) ---
-    # Bu tablolar v1 ile aynı kalacak.
+    # --- ÇEK/SENET TABLOLARI ---
     cursor.execute(
         """
         CREATE TABLE IF NOT EXISTS cekler_senetler (
@@ -205,12 +180,15 @@ def tablolari_olustur():
             banka_id INTEGER,
             vade_tarihi TEXT NOT NULL,
             tutar REAL NOT NULL,
+            kesideci TEXT DEFAULT '',
+            ciranta TEXT DEFAULT '',
+            aciklama TEXT DEFAULT '',
             firma_id INTEGER DEFAULT 1,
             created_at TEXT DEFAULT CURRENT_TIMESTAMP,
             updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (banka_id) REFERENCES banka_kurumlari(id)
         )
-    """
+        """
     )
 
     cursor.execute(
@@ -224,34 +202,16 @@ def tablolari_olustur():
             karsi_hesap_id INTEGER,
             karsi_hesap_ismi TEXT,
             ilgili_hareket_id INTEGER,
+            fis_id INTEGER,
             aciklama TEXT,
             firma_id INTEGER DEFAULT 1,
             created_at TEXT DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (cek_senet_id) REFERENCES cekler_senetler(id)
         )
-    """
+        """
     )
 
-    # cekler_senetler tablosuna yeni alanları ekle (mevcut veritabanı için)
-    cursor.execute("PRAGMA table_info(cekler_senetler)")
-    columns = [col[1] for col in cursor.fetchall()]
-    if 'banka_id' not in columns:
-        cursor.execute("ALTER TABLE cekler_senetler ADD COLUMN banka_id INTEGER")
-    if 'kesideci' not in columns:
-        cursor.execute("ALTER TABLE cekler_senetler ADD COLUMN kesideci TEXT DEFAULT ''")
-    if 'ciranta' not in columns:
-        cursor.execute("ALTER TABLE cekler_senetler ADD COLUMN ciranta TEXT DEFAULT ''")
-    if 'aciklama' not in columns:
-        cursor.execute("ALTER TABLE cekler_senetler ADD COLUMN aciklama TEXT DEFAULT ''")
-
-    # cek_senet_hareketleri tablosuna fis_id alanını ekle (mevcut veritabanı için)
-    cursor.execute("PRAGMA table_info(cek_senet_hareketleri)")
-    columns = [col[1] for col in cursor.fetchall()]
-    if 'fis_id' not in columns:
-        cursor.execute("ALTER TABLE cek_senet_hareketleri ADD COLUMN fis_id INTEGER")
-
-    # --- PERFORMANS İYİLEŞTİRMESİ ---
-    # Yeni yapıya uygun indexler
+    # --- PERFORMANS İNDEKSLERİ ---
     cursor.execute("""
         CREATE INDEX IF NOT EXISTS idx_fis_satirlari_hesap ON fis_satirlari (hesap_turu, hesap_id, firma_id);
     """)
@@ -271,7 +231,7 @@ def tablolari_olustur():
     )
     cursor.execute("INSERT OR IGNORE INTO firmalar (id, firma_adi, durum) VALUES (1, 'Ana Firma (Varsayılan)', 1)")
 
-    # --- HİZMET KARTI GRUPLARI: her firma için "Diğer" gider/gelir grubu oluştur ---
+    # --- HİZMET KARTI GRUPLARI: varsayılan "Diğer" grupları ---
     cursor.execute("SELECT id FROM firmalar")
     firma_ids = [row[0] for row in cursor.fetchall()]
     for fid in firma_ids:
@@ -281,25 +241,11 @@ def tablolari_olustur():
                 ("Diğer", tur, fid),
             )
 
-    # Grubu atanmamış mevcut kartları kendi türündeki "Diğer" grubuna ata
-    cursor.execute(
-        """
-        UPDATE hizmet_kartlari
-        SET grup_id = (
-            SELECT g.id FROM hizmet_kartlari_gruplari g
-            WHERE g.grup_adi = 'Diğer' AND g.tur = hizmet_kartlari.tur
-              AND g.firma_id = hizmet_kartlari.firma_id
-        )
-        WHERE grup_id IS NULL
-        """
-    )
-
     conn.commit()
     conn.close()
 
 
 if __name__ == "__main__":
-    # Bu dosya doğrudan çalıştırıldığında veritabanını sıfırdan oluşturur.
     print("Veritabanı dosyası siliniyor (varsa)...")
     if os.path.exists(DB_YOLU):
         os.remove(DB_YOLU)

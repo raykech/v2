@@ -310,7 +310,7 @@ class StokTanimView(tk.Frame):
             self.ent_satis_fiyati.insert(0, format_currency(stok_data.get('satis_fiyati', 0)))
             self.ent_kdv_oran.delete(0, tk.END)
             self.ent_kdv_oran.insert(0, f"{stok_data.get('kdv_oran', 20):g}")
-            self.ent_kritik_miktar.insert(0, format_currency(stok_data.get('kritik_miktar', 0)))
+            self.ent_kritik_miktar.insert(0, f"{stok_data.get('kritik_miktar', 0):g}")
             self.cmb_durum.set("Aktif" if stok_data.get('durum', 1) == 1 else "Pasif")
 
             kategori_adi = stok_data.get('kategori', '')

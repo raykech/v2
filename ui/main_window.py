@@ -106,7 +106,7 @@ class AnaPencere(tk.Tk):
         status_bar = tk.Frame(self, bg="#4a69bd", height=28)
         status_bar.pack(side="bottom", fill="x")
         
-        status_text = f"Firma: {self.aktif_firma_adi}  |  Çalışma Yılı: {self.aktif_yil}  |  (Tıklayarak değiştir)"
+        status_text = f"Firma: {self.aktif_firma_adi}  |  Çalışma Yılı: {self.aktif_yil}"
         self.lbl_status = tk.Label(
             status_bar,
             text=status_text,
