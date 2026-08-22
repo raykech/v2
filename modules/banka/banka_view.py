@@ -492,7 +492,8 @@ class BankaModulu(tk.Frame):
         if self.form_instance:
             self.form_instance.yenile()
         else:
-            self._load_filter_data()
+            if hasattr(self, "_load_filter_data"):
+                self._load_filter_data()
             self.listele()
 
     def select_and_highlight_fis(self, fis_id):

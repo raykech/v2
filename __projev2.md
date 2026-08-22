@@ -29,16 +29,43 @@ core/
   db.py                     SQLite bağlantısı ve şema kurulumu
   services.py               Ortak fiş/kart servisleri + çek/senet yardımcıları
 modules/
-  kasa/                     Kasa modülü (view + form)
-  cari/                     Cari modülü
-  banka/                    Banka modülü
-  fatura/                   Fatura modülü
-  cek_senet/                Çek/Senet modülü
-  tanimlar/                 Tanımlar (Stok, Cari, Kasa, Hizmet, Banka)
+  kasa/
+    kasa_view.py            Kasa modülü liste görünümü
+    kasa_form.py            Kasa fiş formu (Gider/Gelir/Virman)
+    kasa_import.py          Kasa Excel import yardımcıları
+  banka/
+    banka_view.py           Banka modülü liste görünümü
+    banka_form.py           Banka fiş formu
+    banka_import.py         Banka Excel import yardımcıları
+  cari/
+    cari_view.py            Cari modülü liste görünümü
+    cari_form.py            Cari fiş formu
+    cari_import.py          Cari Excel import yardımcıları
+  fatura/
+    fatura_view.py          Fatura modülü liste görünümü
+    fatura_form.py          Fatura fiş formu
+    fatura_import.py        Fatura Excel import yardımcıları
+  cek_senet/
+    cek_senet_view.py       Çek/Senet modülü liste görünümü
+    cek_senet_form.py       Çek/Senet fiş formu
+    cek_senet_import.py     Çek/Senet Excel import yardımcıları
+  acilis/
+    acilis_form.py          Açılış fişi formu (Kasa/Banka/Cari)
+  tanimlar/
+    tanimlar_view.py        Tanımlar ana görünümü (Notebook sekmeleri)
+    cari_view.py            Cari kart tanımı
+    stok_view.py            Stok kart tanımı
+    kasa_view.py            Kasa kart tanımı
+    hizmet_view.py          Hizmet/Masraf kart tanımı
+    banka_kurum_view.py     Banka kurum tanımı
+    banka_hesap_view.py     Banka hesap tanımı
+    tanim_import.py         Tanım kartları (Cari, Stok, Hizmet, Kasa, Banka) Excel import
   raporlar/                 Raporlar
+  ayarlar/                  Ayarlar (firma, yıl)
 ui/
   main_window.py            Ana pencere, sekmeler, F5 ile yeniden yükleme
   dialogs.py                Yeni kart ekleme/düzenleme diyalogları
+  import_preview.py         Import önizleme dialog sınıfları (Kasa, Fatura, Banka, Cari, Çek/Senet, Tanım)
   widgets/
     lookup_widget.py        Arama ve seçim bileşeni
     advanced_treeview.py    Gelişmiş filtreli/sıralamalı Treeview bileşeni
@@ -141,11 +168,18 @@ Fiş türleri:
 - Kasa Gider Fişi
 - Kasa Gelir Fişi
 - Kasalar Arası Virman
+- Kasa Açılış Fişi (Açılış formu ile)
 
 Özellikler:
 - Gider/Gelir fişlerinde Hizmet kartı satırları + Kasa karşı satırı
 - Virman fişinde satır listesi gizlenir; kaynak kasa, hedef kasa ve tutar alanları kullanılır
 - KDV otomatik dolum ve anında satır toplamı hesabı
+
+**Excel İçe Aktarma (`kasa_import.py`)**
+- Template sayfası: "Kasa İşlemleri" + "Açıklama"
+- Sütunlar: Fiş Türü, Tarih, Fiş No, Genel Açıklama, Kasa / Ana Kasa, Hedef Kasa, Gider/Gelir Kartı, Yön, Satır Açıklaması, Miktar, Birim Fiyat, KDV %, Tutar
+- Gruplama: Aynı Fiş No + Tarih + Kasa satırları tek fişte toplanır. Fiş No boşsa her satır ayrı fiş.
+- KDV % boş bırakılırsa 0 kabul edilir.
 
 ### 5.2. Banka
 
@@ -158,6 +192,7 @@ Fiş türleri:
 - Bankadan Çekilen
 - Gelen Banka Transferi
 - Giden Banka Transferi
+- Banka Açılış Fişi (Açılış formu ile)
 
 Özellikler:
 - Gider/Gelir fişlerinde Hizmet kartı satırları + Banka karşı satırı
@@ -165,6 +200,13 @@ Fiş türleri:
 - POS hesapları ile normal banka hesapları ayrıştırılır
 - Bankaya Yatan / Bankadan Çekilen işlemlerinde karşı hesap Kasa'dır
 - Gelen/Giden Transfer işlemlerinde karşı hesap Cari'dir
+
+**Excel İçe Aktarma (`banka_import.py`)**
+- Template sayfası: "Banka İşlemleri" + "Açıklama"
+- Sütunlar: Fiş Türü, Tarih, Fiş No, Açıklama, Ana Banka, Hedef / Karşı Hesap, Gider/Gelir Kartı, Yön, Satır Açıklaması, Miktar, Birim Fiyat, KDV %, Tutar
+- Blokeyi Bankaya Aktar: Ana Banka POS, Hedef normal banka hesabı olmalıdır.
+- Bankaya Yatan / Bankadan Çekilen: Ana Banka normal (Vadesiz), karşı hesap Kasa.
+- Gelen/Giden Transfer: Ana Banka normal (Vadesiz), karşı hesap Cari.
 
 ### 5.3. Cari
 
@@ -179,6 +221,14 @@ Fiş türleri:
 - Alacak/Borç Dekontu: üstte tek Gider/Gelir kartı, satırlarda Cariler
 - Cari Ödeme/Tahsilat: ödeme türü Kasa veya Banka
 - Cari Virman: satır bazlı borç/alacak, toplam borç = toplam alacak zorunluluğu
+
+**Excel İçe Aktarma (`cari_import.py`)**
+- Template sayfası: "Cari İşlemleri" + "Açıklama"
+- Sütunlar: Fiş Türü, Tarih, Fiş No, Açıklama, Ana Kart / Ödeme Hesabı, Ödeme Türü, Cari, Yön, Satır Açıklaması, Tutar
+- Alacak Dekontu: Ana Kart / Ödeme Hesabı'na Gider kartı yazılır, satırlara Cariler.
+- Borç Dekontu: Ana Kart / Ödeme Hesabı'na Gelir kartı yazılır, satırlara Cariler.
+- Cari Ödeme/Tahsilat: Ödeme Türü (Kasa/Banka) ve Ödeme Hesabı (kasa/banka adı) girilir, satırlara Cariler.
+- Cari Virman: Yön (Borç/Alacak) ile Cariler girilir, borç toplam = alacak toplam.
 
 ### 5.4. Fatura
 
@@ -202,6 +252,12 @@ Fiş türleri:
 - Peşin ödemelerde `kaynak_modul='Fatura'` ve `kaynak_fis_id=<fatura_id>` ile bağlı Kasa/Banka fişi oluşturulur
 - KDV otomatik dolum ve satır toplamı hesabı
 
+**Excel İçe Aktarma (`fatura_import.py`)**
+- Template sayfası: "Fatura İşlemleri" + "Açıklama"
+- Sütunlar: Fiş Türü, Tarih, Fatura No, Açıklama, Cari, Ödeme Tipi, Ödeme Hesabı, Stok/Hizmet Adı, Satır Açıklaması, Miktar, Birim Fiyat, KDV %, Tutar
+- Vadeli faturalarda Cari zorunludur; Nakit/Banka/POS faturalarında Ödeme Hesabı zorunludur.
+- Hizmet faturalarında Miktar kullanılmaz (otomatik 1).
+
 ### 5.5. Çek/Senet
 
 Fiş türleri:
@@ -210,6 +266,7 @@ Fiş türleri:
 - Çek/Senet Ciro Etme
 - Çek/Senet Tahsil Fişi
 - Çek/Senet İade Fişi
+- Çek/Senet Açılış Fişi
 
 Durumlar:
 - Portföyde
@@ -235,16 +292,32 @@ Kurallar:
 - Tahsil fişinde tüm satırlar aynı durumda olmalıdır.
 - Bir fiş, ilgili çek/senedin son hareketi değilse düzenlenemez/silinemez.
 
+**Excel İçe Aktarma (`cek_senet_import.py`)**
+- Şu an yalnızca **Çek/Senet Giriş Fişi** ve **Çek/Senet Açılış Fişi** desteklenir.
+- Template sayfası: "Çek/Senet İşlemleri" + "Açıklama"
+- Sütunlar: Fiş Türü, Tarih, Fiş No, Açıklama, Seri No, Tür, Banka Kurumu, Vade, Tutar, Keşideci, Ciranta, Cari / Karşı Hesap, Satır Açıklaması, Kasa / Banka Hesabı, Tahsil Türü, Durum
+- Seri No benzersiz olmalıdır; aynı seri no daha önce kullanılmışsa hata verilir.
+- Giriş fişinde Cari zorunludur; Açılış fişinde Cari istenmez.
+
 ### 5.6. Tanımlar
 
+Tanımlar notebook'u şu sekmelerden oluşur:
 - Stok Kartları
 - Cari Kartları
 - Kasa Kartları
 - Hizmet Kartları (Gider/Gelir + Grup)
 - Banka Hesapları
 - Banka Kurumları
+- **Excel Yükle** (en son sekme) – Tanım kartlarını Excel'den toplu içe aktarır.
 
 Tanımlar sekmeler arası geçişte otomatik yenilenir.
+
+**Excel İçe Aktarma (`tanim_import.py`)**
+- "Excel Yükle" sekmesinden erişilir.
+- Tek Excel dosyasında 6 sayfa: Cari Kartlar, Stok Kartları, Hizmet Kartları, Kasa Kartları, Banka Kurumları, Banka Hesapları
+- Aynı isimde kart tanımlıysa hata verir (güncelleme yapılmaz, manuel olarak düzenlenmesi gerekir).
+- Stok Kategori/Birim otomatik oluşturulur.
+- Hizmet Grubu ve Banka Kurumu eksikse otomatik oluşturulur.
 
 ### 5.7. Raporlar
 
@@ -321,12 +394,13 @@ Veritabanı `core/db.py` çalıştırıldığında `on_muhasebe.db` olarak otoma
 ## 9. Güncel Durum
 
 Tamamlanan modüller:
-- Kasa
-- Banka
-- Cari
-- Fatura
-- Çek/Senet
-- Tanımlar
+- Kasa (manuel + Excel import)
+- Banka (manuel + Excel import)
+- Cari (manuel + Excel import)
+- Fatura (manuel + Excel import)
+- Çek/Senet (manuel + Excel import – Giriş ve Açılış)
+- Tanımlar (manuel + Excel import – Cari, Stok, Hizmet, Kasa, Banka)
 - Raporlar
 
 Uygulama, tek kullanıcılı yerel ön muhasebe işlemlerini fiş bazlı olarak yönetebilecek durumdadır.
+Tüm modüller Excel import desteğine sahiptir.

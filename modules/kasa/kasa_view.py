@@ -494,11 +494,10 @@ class KasaModulu(tk.Frame):
 
     def yenile(self):
         if self.form_instance:
-            # Eğer form açıksa, yenileme isteğini forma yönlendir.
             self.form_instance.yenile()
         else:
-            # Eğer form kapalıysa (liste görünümündeysek), listeyi ve filtre verilerini yenile.
-            self._load_filter_data()
+            if hasattr(self, "_load_filter_data"):
+                self._load_filter_data()
             self.listele()
 
     def select_and_highlight_fis(self, fis_id):
