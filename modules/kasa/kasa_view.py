@@ -1,11 +1,18 @@
 import tkinter as tk
-from tkinter import ttk, messagebox
+from tkinter import ttk, messagebox, filedialog
 from tkcalendar import DateEntry
 from datetime import datetime
 import re # Kaynak modül ayrıştırması için eklendi
 from modules.kasa.kasa_form import KasaFisiFormu
 from modules.acilis.acilis_form import AcilisFisiFormu
+from modules.kasa.kasa_import import (
+    kasa_ornek_excel_olustur,
+    kasa_excel_oku,
+    kasa_import_dogrula,
+    kasa_fislerini_kaydet,
+)
 from core.db import veritabani_baglan
+from ui.import_preview import ImportPreviewDialog
 from ui.widgets.tooltip import Tooltip
 from utils.formatters import format_date, format_currency, parse_currency
 from core.services import fis_sil as fis_sil_service
@@ -43,10 +50,11 @@ class KasaModulu(tk.Frame):
         # Menubutton için menü oluşturma
         self.yeni_fis_menu = tk.Menu(self.btn_yeni, tearoff=0)
         self.btn_yeni["menu"] = self.yeni_fis_menu
+        self.yeni_fis_menu.add_command(label="Kasa Açılış Fişi", command=lambda: self._ac_yeni_fis_formu("Kasa Açılış Fişi"))
         self.yeni_fis_menu.add_command(label="Kasa Gider Fişi", command=lambda: self._ac_yeni_fis_formu("Kasa Gider Fişi"))
         self.yeni_fis_menu.add_command(label="Kasa Gelir Fişi", command=lambda: self._ac_yeni_fis_formu("Kasa Gelir Fişi"))
         self.yeni_fis_menu.add_command(label="Kasalar Arası Virman", command=lambda: self._ac_yeni_fis_formu("Kasalar Arası Virman"))
-        self.yeni_fis_menu.add_command(label="Kasa Açılış Fişi", command=lambda: self._ac_yeni_fis_formu("Kasa Açılış Fişi"))
+
 
         self.btn_duzenle = tk.Button(
             ust_frame,
@@ -77,6 +85,26 @@ class KasaModulu(tk.Frame):
             pady=4,
         )
         self.btn_kaynaga_git.pack(side="left", padx=(0, 10))
+
+        self.btn_ornek_indir = tk.Button(
+            ust_frame,
+            text="Örnek İndir",
+            command=self.ornek_indir,
+            font=("Arial", 9, "bold"),
+            padx=10,
+            pady=4,
+        )
+        self.btn_ornek_indir.pack(side="left", padx=(0, 10))
+
+        self.btn_veri_yukle = tk.Button(
+            ust_frame,
+            text="Veri Yükle",
+            command=self.veri_yukle,
+            font=("Arial", 9, "bold"),
+            padx=10,
+            pady=4,
+        )
+        self.btn_veri_yukle.pack(side="left", padx=(0, 10))
 
         # Filtre Alanı
         filter_frame = tk.LabelFrame(self, text="Filtrele", bg="#f5f7fb", padx=10, pady=5)
@@ -233,6 +261,103 @@ class KasaModulu(tk.Frame):
         self.cmb_fis_turu_filtre.set("Tümü")
         self.ent_arama.delete(0, tk.END)
         self.listele()
+
+    def ornek_indir(self):
+        """Örnek Excel import şablonunu indirir."""
+        dosya_yolu = filedialog.asksaveasfilename(
+            title="Örnek Excel Şablonunu Kaydet",
+            defaultextension=".xlsx",
+            filetypes=[("Excel Dosyası", "*.xlsx")],
+            initialfile="kasa_import_ornek.xlsx",
+            parent=self,
+        )
+        if not dosya_yolu:
+            return
+
+        try:
+            kasa_ornek_excel_olustur(dosya_yolu)
+            messagebox.showinfo("Başarılı", "Örnek Excel dosyası oluşturuldu.\nDoldurup tekrar Veri Yükle ile içe aktarabilirsiniz.", parent=self)
+        except Exception as e:
+            messagebox.showerror("Excel Oluşturma Hatası", f"Örnek dosya oluşturulamadı:\n{e}", parent=self)
+
+    def veri_yukle(self):
+        """Excel dosyasını okur, doğrular ve önizleme sonrası içe aktarır."""
+        try:
+            self._veri_yukle_impl()
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            messagebox.showerror("Veri Yükleme Hatası", f"Beklenmeyen bir hata oluştu:\n{e}", parent=self)
+
+    def _veri_yukle_impl(self):
+        """Excel dosyasını okur, doğrular ve önizleme sonrası içe aktarır."""
+        dosya_yolu = filedialog.askopenfilename(
+            title="Kasa Excel Dosyası Seç",
+            filetypes=[("Excel Dosyası", "*.xlsx *.xls")],
+            parent=self,
+        )
+        if not dosya_yolu:
+            return
+
+        try:
+            satirlar = kasa_excel_oku(dosya_yolu)
+            print(f"[Kasa Import] Excel okundu, satır sayısı: {len(satirlar)}")
+            hazir_fisler, hatalar, uyarilar = kasa_import_dogrula(
+                satirlar,
+                self.main_app.aktif_firma_id,
+                self.main_app.aktif_yil,
+            )
+            print(f"[Kasa Import] Hazır fiş: {len(hazir_fisler)}, hata: {len(hatalar)}, uyarı: {len(uyarilar)}")
+        except Exception as e:
+            messagebox.showerror("Excel Okuma Hatası", f"Dosya okunurken bir hata oluştu:\n{e}", parent=self)
+            return
+
+        if not hazir_fisler and not hatalar:
+            messagebox.showinfo("Bilgi", "Aktarılacak veri bulunamadı.\nExcel dosyası boş olabilir veya satırlar silinmiş olabilir.", parent=self)
+            return
+
+        import_basarili = False
+
+        def import_callback():
+            nonlocal import_basarili
+            conn = None
+            try:
+                conn = veritabani_baglan()
+                cursor = conn.cursor()
+                eklenen_ids = kasa_fislerini_kaydet(cursor, hazir_fisler, self.main_app.aktif_firma_id, self.main_app.aktif_yil)
+                conn.commit()
+                import_basarili = True
+                fis_nolar = [f.get("fis_no") or "(boş)" for f in hazir_fisler]
+                mesaj = f"{len(eklenen_ids)} fiş başarıyla içe aktarıldı.\nFiş No: {', '.join(fis_nolar)}"
+                messagebox.showinfo("Başarılı", mesaj, parent=self)
+                return True
+            except Exception as e:
+                if conn:
+                    conn.rollback()
+                messagebox.showerror("İçe Aktarma Hatası", f"Fişler kaydedilirken bir hata oluştu:\n{e}", parent=self)
+                return False
+            finally:
+                if conn:
+                    conn.close()
+
+        try:
+            ImportPreviewDialog(
+                self,
+                "Kasa İçe Aktarma Önizleme",
+                hazir_fisler,
+                hatalar,
+                uyarilar,
+                on_import=import_callback,
+            )
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            messagebox.showerror("Önizleme Hatası", f"Önizleme ekranı açılırken bir hata oluştu:\n{e}", parent=self)
+
+        if import_basarili:
+            self.filtreleri_temizle()
+        else:
+            self.yenile()
 
     def _ac_yeni_fis_formu(self, fis_turu):
         """Belirtilen fiş türü için yeni fiş formunu açar."""

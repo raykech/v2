@@ -7,6 +7,7 @@ from .cari_view import CariTanimView
 from .hizmet_view import HizmetTanimView
 from .banka_kurum_view import BankaKurumTanimView
 from .banka_hesap_view import BankaHesapTanimView
+from .tanim_import import TanimImportView
 
 class TanimlarModulu(tk.Frame):
     def __init__(self, parent, main_app):
@@ -39,6 +40,9 @@ class TanimlarModulu(tk.Frame):
 
         self.banka_kurum_tab = BankaKurumTanimView(self.notebook, self.main_app)
         self.notebook.add(self.banka_kurum_tab, text="Banka Kurumları")
+
+        self.import_tab = TanimImportView(self.notebook, self.main_app)
+        self.notebook.add(self.import_tab, text="Veri Yükle")
 
     def yenile(self):
         """Aktif sekmeyi yeniler."""

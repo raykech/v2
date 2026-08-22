@@ -27,6 +27,7 @@ class HizmetTanimView(tk.Frame):
         liste_frame = tk.Frame(self, bg="#f5f7fb")
         liste_frame.pack(side="right", fill="both", expand=True, padx=(0, 10), pady=10)
 
+
         # Form Alanları
         form_alanlari = tk.Frame(form_frame, bg="#f5f7fb")
         form_alanlari.pack(fill="x")

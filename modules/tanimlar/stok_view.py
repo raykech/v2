@@ -28,6 +28,7 @@ class StokTanimView(tk.Frame):
         liste_frame = tk.Frame(self, bg="#f5f7fb")
         liste_frame.pack(side="right", fill="both", expand=True, padx=(0, 10), pady=10)
 
+
         # --- Form Alanları (Sol Taraf) ---
         form_alanlari = tk.Frame(form_frame, bg="#f5f7fb")
         form_alanlari.pack(fill="x")
@@ -307,6 +308,7 @@ class StokTanimView(tk.Frame):
             self.ent_stok_kodu.insert(0, stok_data.get('stok_kodu', ''))
             self.ent_alis_fiyati.insert(0, format_currency(stok_data.get('alis_fiyati', 0)))
             self.ent_satis_fiyati.insert(0, format_currency(stok_data.get('satis_fiyati', 0)))
+            self.ent_kdv_oran.delete(0, tk.END)
             self.ent_kdv_oran.insert(0, f"{stok_data.get('kdv_oran', 20):g}")
             self.ent_kritik_miktar.insert(0, format_currency(stok_data.get('kritik_miktar', 0)))
             self.cmb_durum.set("Aktif" if stok_data.get('durum', 1) == 1 else "Pasif")
