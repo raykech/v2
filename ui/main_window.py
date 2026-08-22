@@ -13,6 +13,7 @@ from modules.cari.cari_view import CariModulu
 from modules.banka.banka_view import BankaModulu
 from modules.cek_senet.cek_senet_view import CekSenetModulu
 from modules.ayarlar.ayarlar_view import AyarlarModulu
+from modules.giris.dashboard_view import GirisDashboardView
 from ui.widgets.tooltip import Tooltip
 from ui.dialogs import FirmaYilDialog
 
@@ -29,6 +30,7 @@ class AnaPencere(tk.Tk):
 
         self.open_tabs = {}
         self.active_tab_key = None
+        self._drag_baslangic = None
 
         self._ust_menu_olustur()
         self._modul_butonlari_olustur()
@@ -155,7 +157,8 @@ class AnaPencere(tk.Tk):
 
         module_instance = None
         if modul_key == "giris":
-            tk.Label(tab_frame, text="Hoş Geldiniz!", font=("Arial", 24, "bold"), bg="white").pack(expand=True)
+            module_instance = GirisDashboardView(tab_frame, self)
+            module_instance.pack(fill="both", expand=True)
         elif modul_key == "kasa":
             module_instance = KasaModulu(tab_frame, self)
             module_instance.pack(fill="both", expand=True)
@@ -197,9 +200,13 @@ class AnaPencere(tk.Tk):
         tab_label = tk.Label(tab_container, text=tab_text, bg="#d7e8ff", fg="#0d6efd", font=("Arial", 9, "bold"), padx=8, pady=2)
         tab_label.pack(side="left")
 
-        # Seçim olayını konteynere ve etikete bağla
-        tab_container.bind("<Button-1>", lambda e, k=modul_key: self._tab_sec(k))
-        tab_label.bind("<Button-1>", lambda e, k=modul_key: self._tab_sec(k))
+        # Seçim + sürükleme olaylarını konteynere ve etikete bağla
+        tab_container.bind("<Button-1>", lambda e, k=modul_key: self._tab_tikla_bas(e, k))
+        tab_container.bind("<B1-Motion>", lambda e, k=modul_key: self._tab_surukle(e, k))
+        tab_container.bind("<ButtonRelease-1>", lambda e, k=modul_key: self._tab_surukle_birak(e, k))
+        tab_label.bind("<Button-1>", lambda e, k=modul_key: self._tab_tikla_bas(e, k))
+        tab_label.bind("<B1-Motion>", lambda e, k=modul_key: self._tab_surukle(e, k))
+        tab_label.bind("<ButtonRelease-1>", lambda e, k=modul_key: self._tab_surukle_birak(e, k))
 
         self.open_tabs[modul_key]["tab_button"] = tab_container
         self.open_tabs[modul_key]["tab_label"] = tab_label
@@ -211,7 +218,70 @@ class AnaPencere(tk.Tk):
             )
             close_btn.pack(side="right", padx=(4, 4))
             close_btn.bind("<Button-1>", lambda e, k=modul_key: self._tab_kapat(k))
+            close_btn.bind("<ButtonRelease-1>", lambda e, k=modul_key: self._tab_surukle_birak(e, k))
             self.open_tabs[modul_key]["close_button"] = close_btn
+
+    def _tab_tikla_bas(self, event, modul_key):
+        """Sekmeye basıldığında: sekmeyi aktif yapar ve sürükleme başlangıcını kaydeder."""
+        self._tab_sec(modul_key)
+        self._drag_baslangic = {"key": modul_key, "x": event.x_root, "surukleniyor": False}
+
+    def _tab_surukle(self, event, modul_key):
+        """Sürükleme sırasında sekmeyi fare konumuna göre yeniden sıralar."""
+        if modul_key == "giris":
+            return  # Giriş sekmesi sabittir, sürüklenemez
+        if not self._drag_baslangic or self._drag_baslangic["key"] != modul_key:
+            return
+        dx = event.x_root - self._drag_baslangic["x"]
+        if not self._drag_baslangic["surukleniyor"]:
+            if abs(dx) < 8:  # 8px üzeri hareket sürükleme sayılır
+                return
+            self._drag_baslangic["surukleniyor"] = True
+
+        # Fare konumuna göre hedef sırayı belirle
+        hedef_x = event.x_root - self.tab_bar.winfo_rootx()
+        mevcut_sira = list(self.open_tabs.keys())
+        yeni_sira = [k for k in mevcut_sira if k != modul_key]
+
+        hedef_index = len(yeni_sira)
+        for i, k in enumerate(yeni_sira):
+            btn = self.open_tabs[k]["tab_button"]
+            btn_x = btn.winfo_x()
+            if hedef_x < btn_x + btn.winfo_width() // 2:
+                hedef_index = i
+                break
+        # Giriş sekmesi daima en başta kalsın (önüne sekme geçmesin)
+        if "giris" in yeni_sira and hedef_index <= 1:
+            hedef_index = 1
+        yeni_sira.insert(hedef_index, modul_key)
+        self._tablari_yeniden_paketle(yeni_sira)
+
+    def _tab_surukle_birak(self, event, modul_key):
+        """Sürükleme bittiğinde sürükleme durumunu temizler ve normal görünüme döner."""
+        if modul_key not in self.open_tabs:
+            return
+        if not self._drag_baslangic:
+            return
+        surukleniyor = self._drag_baslangic.get("surukleniyor", False)
+        self._drag_baslangic = None
+        if surukleniyor:
+            tab_container = self.open_tabs[modul_key]["tab_button"]
+            tab_label = self.open_tabs[modul_key].get("tab_label")
+            if modul_key == self.active_tab_key:
+                tab_container.config(bg="#0d6efd")
+                if tab_label: tab_label.config(bg="#0d6efd", fg="white")
+            else:
+                tab_container.config(bg="#d7e8ff")
+                if tab_label: tab_label.config(bg="#d7e8ff", fg="#0d6efd")
+
+    def _tablari_yeniden_paketle(self, sira):
+        """Sekmeleri verilen sıraya göre yeniden paketler (sıra değişimi)."""
+        for key in self.open_tabs:
+            self.open_tabs[key]["tab_button"].pack_forget()
+        for key in sira:
+            if key in self.open_tabs:
+                self.open_tabs[key]["tab_button"].pack(side="left", padx=(0, 4), pady=2, ipady=2)
+        self.update_idletasks()
 
     def _tab_sec(self, modul_key):
         self.active_tab_key = modul_key
