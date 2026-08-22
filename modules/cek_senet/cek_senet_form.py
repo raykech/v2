@@ -30,9 +30,19 @@ class CekSenetFisiFormu(tk.Frame):
         "Çek/Senet Ciro Etme",
         "Çek/Senet Tahsil Fişi",
         "Çek/Senet İade Fişi",
+        "Çek/Senet Açılış Fişi",
+    ]
+
+    DURUMLAR = [
+        "Portföyde",
+        "Bankada Tahsilde",
+        "Cirolu",
+        "Tahsil Edildi",
+        "İade Edildi",
     ]
 
     GIRIS_FISI = "Çek/Senet Giriş Fişi"
+    ACILIS_FISI = "Çek/Senet Açılış Fişi"
     BANKA_TAHSIL_FISI = "Çek/Senet Bankaya Tahsile Verme"
     CIRO_FISI = "Çek/Senet Ciro Etme"
     TAHSIL_FISI = "Çek/Senet Tahsil Fişi"
@@ -135,6 +145,12 @@ class CekSenetFisiFormu(tk.Frame):
         self.ent_ciranta = tk.Entry(self.giris_frame, width=16)
         self.ent_satir_aciklama_giris = tk.Entry(self.giris_frame, width=20)
 
+        self.lbl_acilis_durum = tk.Label(self.giris_frame, text="Durum", font=("Arial", 8, "bold"))
+        self.cmb_acilis_durum = ttk.Combobox(
+            self.giris_frame, state="readonly", width=18, values=self.DURUMLAR,
+        )
+        self.cmb_acilis_durum.set("Portföyde")
+
         tk.Label(self.giris_frame, text="Seri No", font=("Arial", 8, "bold")).grid(row=0, column=0)
         tk.Label(self.giris_frame, text="Tür", font=("Arial", 8, "bold")).grid(row=0, column=1)
         tk.Label(self.giris_frame, text="Banka", font=("Arial", 8, "bold")).grid(row=0, column=2)
@@ -154,6 +170,7 @@ class CekSenetFisiFormu(tk.Frame):
         self.ent_satir_aciklama_giris.grid(row=1, column=7, padx=2, pady=(2, 0), sticky="ew")
         self.btn_ekle_giris = tk.Button(self.giris_frame, text="+", command=self.satir_ekle, width=3)
         self.btn_ekle_giris.grid(row=1, column=8, padx=2, pady=(2, 0), sticky="ew")
+        self._giris_durum_gorunur(False)
 
         # Mevcut çek/senet seçimi için alanlar
         self.secim_frame = tk.Frame(self.entry_row_frame)
@@ -209,6 +226,17 @@ class CekSenetFisiFormu(tk.Frame):
         self.ent_tutar.bind("<Return>", lambda e: self.satir_ekle())
         self.lookup_cek_senet.ent_display.bind("<Return>", lambda e: self.ent_satir_aciklama.focus_set())
         self.ent_satir_aciklama.bind("<Return>", lambda e: self.satir_ekle())
+
+    def _giris_durum_gorunur(self, gorunur):
+        """Açılış fişinde durum alanını gösterir, normal girişte gizler."""
+        if gorunur:
+            self.lbl_acilis_durum.grid(row=0, column=8, padx=2, pady=2)
+            self.cmb_acilis_durum.grid(row=1, column=8, padx=2, pady=(2, 0), sticky="ew")
+            self.btn_ekle_giris.grid(row=1, column=9, padx=2, pady=(2, 0), sticky="ew")
+        else:
+            self.lbl_acilis_durum.grid_forget()
+            self.cmb_acilis_durum.grid_forget()
+            self.btn_ekle_giris.grid(row=1, column=8, padx=2, pady=(2, 0), sticky="ew")
 
     # ---------------------------------------------------------------- Veriler
     def verileri_yukle(self):
@@ -289,7 +317,7 @@ class CekSenetFisiFormu(tk.Frame):
 
         self.baslik_dinamik_frame.grid_columnconfigure(1, weight=1)
 
-        if self.fis_turu == self.GIRIS_FISI:
+        if self.fis_turu in (self.GIRIS_FISI, self.ACILIS_FISI):
             self.giris_frame.pack(fill="x")
             self.secim_frame.pack_forget()
             self.lookup_banka_kurum.configure_lookup(
@@ -297,14 +325,23 @@ class CekSenetFisiFormu(tk.Frame):
                 data_dict=self.banka_kurum_dict,
                 on_new=lambda: self.yeni_kart_ekle("banka_kurumlari"),
             )
-            tk.Label(self.baslik_dinamik_frame, text="Müşteri / Cari:").grid(row=0, column=0, sticky="w", pady=2)
-            self.lookup_cari = LookupWidget(self.baslik_dinamik_frame)
-            self.lookup_cari.grid(row=0, column=1, padx=5, pady=2, sticky="ew")
-            self.lookup_cari.configure_lookup(
-                title="Cari Seç",
-                data_dict=self.cari_dict,
-                on_new=lambda: self.yeni_kart_ekle("cariler"),
-            )
+            if self.fis_turu == self.ACILIS_FISI:
+                self._giris_durum_gorunur(True)
+                tk.Label(
+                    self.baslik_dinamik_frame,
+                    text="Açılış durumu her satırda seçilir. Bu fiş cari/karşı satır oluşturmaz.",
+                    font=("Arial", 9, "italic"),
+                ).grid(row=0, column=0, columnspan=2, sticky="w", pady=2)
+            else:
+                self._giris_durum_gorunur(False)
+                tk.Label(self.baslik_dinamik_frame, text="Müşteri / Cari:").grid(row=0, column=0, sticky="w", pady=2)
+                self.lookup_cari = LookupWidget(self.baslik_dinamik_frame)
+                self.lookup_cari.grid(row=0, column=1, padx=5, pady=2, sticky="ew")
+                self.lookup_cari.configure_lookup(
+                    title="Cari Seç",
+                    data_dict=self.cari_dict,
+                    on_new=lambda: self.yeni_kart_ekle("cariler"),
+                )
         elif self.fis_turu == self.BANKA_TAHSIL_FISI:
             self.giris_frame.pack_forget()
             self.secim_frame.pack(fill="x")
@@ -445,7 +482,7 @@ class CekSenetFisiFormu(tk.Frame):
             )
 
     def _setup_enter_navigation(self):
-        if self.fis_turu == self.GIRIS_FISI:
+        if self.fis_turu in (self.GIRIS_FISI, self.ACILIS_FISI):
             self.ent_seri_no.bind("<Return>", lambda e: self.cmb_tur.focus_set())
             self.cmb_tur.bind("<<ComboboxSelected>>", lambda e: self.lookup_banka_kurum.ent_display.focus_set())
             self.ent_tutar.bind("<Return>", lambda e: self.satir_ekle())
@@ -463,7 +500,7 @@ class CekSenetFisiFormu(tk.Frame):
         return f"{fiyat:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
 
     def satir_ekle(self):
-        if self.fis_turu == self.GIRIS_FISI:
+        if self.fis_turu in (self.GIRIS_FISI, self.ACILIS_FISI):
             self._satir_ekle_giris()
         else:
             self._satir_ekle_mevcut()
@@ -479,6 +516,7 @@ class CekSenetFisiFormu(tk.Frame):
         kesideci = self.ent_kesideci.get().strip()
         ciranta = self.ent_ciranta.get().strip()
         aciklama = self.ent_satir_aciklama_giris.get().strip()
+        durum = self.cmb_acilis_durum.get() if self.fis_turu == self.ACILIS_FISI else "Portföyde"
 
         if not seri_no:
             messagebox.showwarning("Eksik Bilgi", "Lütfen seri no girin.", parent=self)
@@ -501,21 +539,26 @@ class CekSenetFisiFormu(tk.Frame):
             "kesideci": kesideci,
             "ciranta": ciranta,
             "aciklama": aciklama,
+            "durum": durum,
         }
+
+        display = f"{seri_no} - {turu} - {banka_adi}"
+        if self.fis_turu == self.ACILIS_FISI:
+            display += f" - {durum}"
 
         if self.duzenlenen_satir_id:
             try:
                 self.satirlar[self.duzenlenen_satir_id] = yeni_satir
                 self.tree_satirlar.item(
                     self.duzenlenen_satir_id,
-                    values=(f"{seri_no} - {turu} - {banka_adi}", self._fmt(tutar), aciklama, "❌"),
+                    values=(display, self._fmt(tutar), aciklama, "❌"),
                 )
             except Exception:
                 self.satir_sayaci += 1
                 item_id = f"satir_{self.satir_sayaci}"
                 self.tree_satirlar.insert(
                     "", "end", iid=item_id,
-                    values=(f"{seri_no} - {turu} - {banka_adi}", self._fmt(tutar), aciklama, "❌"),
+                    values=(display, self._fmt(tutar), aciklama, "❌"),
                 )
                 self.satirlar[item_id] = yeni_satir
             self.duzenlenen_satir_id = None
@@ -524,7 +567,7 @@ class CekSenetFisiFormu(tk.Frame):
             item_id = f"satir_{self.satir_sayaci}"
             self.tree_satirlar.insert(
                 "", "end", iid=item_id,
-                values=(f"{seri_no} - {turu} - {banka_adi}", self._fmt(tutar), aciklama, "❌"),
+                values=(display, self._fmt(tutar), aciklama, "❌"),
             )
             self.satirlar[item_id] = yeni_satir
 
@@ -588,7 +631,7 @@ class CekSenetFisiFormu(tk.Frame):
 
     def temizle_giris_satiri(self):
         self.duzenlenen_satir_id = None
-        if self.fis_turu == self.GIRIS_FISI:
+        if self.fis_turu in (self.GIRIS_FISI, self.ACILIS_FISI):
             self.ent_seri_no.delete(0, tk.END)
             self.cmb_tur.set("Çek")
             self.lookup_banka_kurum.clear()
@@ -596,6 +639,8 @@ class CekSenetFisiFormu(tk.Frame):
             self.ent_kesideci.delete(0, tk.END)
             self.ent_ciranta.delete(0, tk.END)
             self.ent_satir_aciklama_giris.delete(0, tk.END)
+            if self.cmb_acilis_durum:
+                self.cmb_acilis_durum.set("Portföyde")
             self.ent_seri_no.focus_set()
         else:
             self.lookup_cek_senet.clear()
@@ -644,6 +689,8 @@ class CekSenetFisiFormu(tk.Frame):
                 self.ent_ciranta.insert(0, satir.get("ciranta", ""))
                 self.ent_satir_aciklama_giris.delete(0, tk.END)
                 self.ent_satir_aciklama_giris.insert(0, satir.get("aciklama", ""))
+                if self.cmb_acilis_durum and satir.get("durum"):
+                    self.cmb_acilis_durum.set(satir["durum"])
             else:
                 self.lookup_cek_senet.set(satir["cek_senet_id"])
                 self.ent_satir_aciklama.delete(0, tk.END)
@@ -715,13 +762,17 @@ class CekSenetFisiFormu(tk.Frame):
         fis_satirlari = []
         hareketler = []
 
-        if self.fis_turu == self.GIRIS_FISI:
-            if not self.lookup_cari or not self.lookup_cari.get():
-                messagebox.showwarning("Eksik Bilgi", "Lütfen müşteri/cari seçin.", parent=self)
-                return
-            cari_id = self.lookup_cari.get()
-            cari_adi = self.lookup_cari.get_value()
-            fis_baslik["cari_id"] = cari_id
+        if self.fis_turu in (self.GIRIS_FISI, self.ACILIS_FISI):
+            acilis = self.fis_turu == self.ACILIS_FISI
+            cari_id = None
+            cari_adi = None
+            if not acilis:
+                if not self.lookup_cari or not self.lookup_cari.get():
+                    messagebox.showwarning("Eksik Bilgi", "Lütfen müşteri/cari seçin.", parent=self)
+                    return
+                cari_id = self.lookup_cari.get()
+                cari_adi = self.lookup_cari.get_value()
+                fis_baslik["cari_id"] = cari_id
             toplam = 0.0
             for satir in self.satirlar.values():
                 if satir.get("cek_senet_id"):
@@ -742,23 +793,24 @@ class CekSenetFisiFormu(tk.Frame):
                     "kdv_oran": 0,
                     "kdv_tutar": 0,
                 })
-                fis_satirlari.append({
-                    "hesap_turu": "Cari",
-                    "hesap_id": cari_id,
-                    "borc": 0,
-                    "alacak": satir["tutar"],
-                    "aciklama": satir.get("aciklama", ""),
-                    "miktar": 1,
-                    "birim_fiyat": satir["tutar"],
-                    "kdv_oran": 0,
-                    "kdv_tutar": 0,
-                })
+                if not acilis:
+                    fis_satirlari.append({
+                        "hesap_turu": "Cari",
+                        "hesap_id": cari_id,
+                        "borc": 0,
+                        "alacak": satir["tutar"],
+                        "aciklama": satir.get("aciklama", ""),
+                        "miktar": 1,
+                        "birim_fiyat": satir["tutar"],
+                        "kdv_oran": 0,
+                        "kdv_tutar": 0,
+                    })
                 hareketler.append({
                     "cek_senet_id": satir_id,
-                    "durum": "Portföyde",
-                    "karsi_hesap_tipi": "Cari",
-                    "karsi_hesap_id": cari_id,
-                    "karsi_hesap_ismi": cari_adi,
+                    "durum": satir.get("durum", "Portföyde"),
+                    "karsi_hesap_tipi": "Cari" if not acilis else None,
+                    "karsi_hesap_id": cari_id if not acilis else None,
+                    "karsi_hesap_ismi": cari_adi if not acilis else None,
                     "aciklama": satir.get("aciklama", ""),
                 })
             fis_baslik["toplam_tutar"] = toplam
@@ -1001,7 +1053,7 @@ class CekSenetFisiFormu(tk.Frame):
             cursor = conn.cursor()
 
             # Yeni çek/senet kayıtlarını ve ID'leri belirle
-            if self.fis_turu == self.GIRIS_FISI:
+            if self.fis_turu in (self.GIRIS_FISI, self.ACILIS_FISI):
                 yeni_cek_ids = []
                 for satir_index, satir in enumerate(self.satirlar.values()):
                     cek_id = satir.get("cek_senet_id")
@@ -1074,7 +1126,7 @@ class CekSenetFisiFormu(tk.Frame):
                 mesaj = "Çek/Senet fişi başarıyla güncellendi."
 
                 # Giriş fişinde silinen çek/senet kartlarını, başka hareketleri yoksa temizle
-                if self.fis_turu == self.GIRIS_FISI and eski_cek_ids:
+                if self.fis_turu in (self.GIRIS_FISI, self.ACILIS_FISI) and eski_cek_ids:
                     for eski_id in eski_cek_ids:
                         if eski_id not in yeni_cek_ids:
                             cursor.execute(
@@ -1142,12 +1194,19 @@ class CekSenetFisiFormu(tk.Frame):
             hareketler = cursor.fetchall()
             hareket_cols = [desc[0] for desc in cursor.description]
 
-            if self.fis_turu == self.GIRIS_FISI:
-                for satir in satirlar:
-                    sd = dict(zip(satir_cols, satir))
-                    if sd["hesap_turu"] == "Cari" and sd["alacak"] > 0 and self.lookup_cari:
-                        self.lookup_cari.set(sd["hesap_id"])
-                        break
+            if self.fis_turu in (self.GIRIS_FISI, self.ACILIS_FISI):
+                acilis = self.fis_turu == self.ACILIS_FISI
+                hareket_durum_map = {}
+                for hareket in hareketler:
+                    hd = dict(zip(hareket_cols, hareket))
+                    hareket_durum_map[hd["cek_senet_id"]] = hd.get("durum", "Portföyde")
+
+                if not acilis:
+                    for satir in satirlar:
+                        sd = dict(zip(satir_cols, satir))
+                        if sd["hesap_turu"] == "Cari" and sd["alacak"] > 0 and self.lookup_cari:
+                            self.lookup_cari.set(sd["hesap_id"])
+                            break
 
                 for satir in satirlar:
                     sd = dict(zip(satir_cols, satir))
@@ -1166,6 +1225,7 @@ class CekSenetFisiFormu(tk.Frame):
                         continue
                     cek_id, seri_no, turu, banka_id, vade, tutar, kesideci, ciranta, aciklama = row
                     banka_adi = next((name for name, i in self.banka_kurum_dict.items() if str(i) == str(banka_id)), "")
+                    durum = hareket_durum_map.get(cek_id, "Portföyde")
                     yeni_satir = {
                         "tip": "yeni",
                         "cek_senet_id": cek_id,
@@ -1178,12 +1238,16 @@ class CekSenetFisiFormu(tk.Frame):
                         "kesideci": kesideci or "",
                         "ciranta": ciranta or "",
                         "aciklama": aciklama or "",
+                        "durum": durum,
                     }
+                    display = f"{seri_no} - {turu} - {banka_adi}"
+                    if acilis:
+                        display += f" - {durum}"
                     self.satir_sayaci += 1
                     item_id = f"satir_{self.satir_sayaci}"
                     self.tree_satirlar.insert(
                         "", "end", iid=item_id,
-                        values=(f"{seri_no} - {turu} - {banka_adi}", self._fmt(tutar), aciklama or "", "❌"),
+                        values=(display, self._fmt(tutar), aciklama or "", "❌"),
                     )
                     self.satirlar[item_id] = yeni_satir
 

@@ -21,6 +21,7 @@ class CekSenetModulu(tk.Frame):
         "Çek/Senet Ciro Etme",
         "Çek/Senet Tahsil Fişi",
         "Çek/Senet İade Fişi",
+        "Çek/Senet Açılış Fişi",
     ]
 
     DURUMLAR = [

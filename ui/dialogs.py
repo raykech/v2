@@ -1,6 +1,7 @@
 import tkinter as tk
 from tkinter import messagebox, ttk
 import sqlite3
+from datetime import datetime
 from core.db import (
     veritabani_baglan
 )
@@ -17,6 +18,7 @@ def ac_kart_dialog(parent, tablo_adi, item_id=None, firma_id=1, kart_turu=None):
         "hizmet_kartlari_gruplari": HizmetKartGrupDialog,
         "stok_kategorileri": GenelTanimDialog,
         "stok_birimleri": GenelTanimDialog,
+"firmalar": FirmaDialog,
     }
     
     dialog_class = dialog_map.get(tablo_adi)
@@ -708,3 +710,177 @@ class YilSecimDialog(tk.Toplevel):
     def on_select(self):
         self.result = int(self.cmb_yil.get())
         self.destroy()
+
+
+class FirmaDialog(BaseDialog):
+    """Firma tanım kartı ekleme / düzenleme diyaloğu."""
+
+    def create_widgets(self):
+        form_frame = tk.Frame(self, padx=15, pady=15)
+        form_frame.pack(fill="both", expand=True)
+
+        tk.Label(form_frame, text="Firma Adı:").grid(row=0, column=0, sticky="w", pady=5)
+        self.ent_firma_adi = tk.Entry(form_frame, width=40)
+        self.ent_firma_adi.grid(row=0, column=1, padx=5, pady=5)
+        self.ent_firma_adi.focus_set()
+
+        btn_frame = tk.Frame(self, pady=10)
+        btn_frame.pack(fill="x", padx=15)
+
+        btn_save = tk.Button(btn_frame, text="Kaydet", command=self.on_save, bg="#198754", fg="white", width=12)
+        btn_save.pack(side="right")
+
+        btn_cancel = tk.Button(btn_frame, text="İptal", command=self.destroy, width=12)
+        btn_cancel.pack(side="right", padx=10)
+
+    def load_data_for_edit(self):
+        conn = veritabani_baglan()
+        cursor = conn.cursor()
+        cursor.execute("SELECT firma_adi FROM firmalar WHERE id = ?", (self.item_id,))
+        data = cursor.fetchone()
+        conn.close()
+        if data:
+            self.ent_firma_adi.insert(0, data[0])
+
+    def on_save(self):
+        firma_adi = self.ent_firma_adi.get().strip()
+        if not firma_adi:
+            messagebox.showerror("Hata", "Firma adı boş bırakılamaz.", parent=self)
+            return
+
+        firma_data = {
+            'id': self.item_id,
+            'firma_adi': firma_adi,
+            'durum': 1,
+        }
+        conn = None
+        try:
+            conn = veritabani_baglan()
+            cursor = conn.cursor()
+            if self.item_id:
+                cursor.execute("UPDATE firmalar SET firma_adi = ? WHERE id = ?", (firma_adi, self.item_id))
+            else:
+                cursor.execute("INSERT INTO firmalar (firma_adi, durum) VALUES (?, 1)", (firma_adi,))
+                self.item_id = cursor.lastrowid
+            conn.commit()
+            self.result = (self.item_id, firma_adi)
+            self.destroy()
+        except sqlite3.IntegrityError:
+            messagebox.showerror("Hata", f"'{firma_adi}' adında bir firma zaten mevcut.", parent=self)
+            if conn: conn.rollback()
+        except Exception as e:
+            messagebox.showerror("Veritabanı Hatası", f"Firma kaydedilirken hata oluştu: {e}", parent=self)
+            if conn: conn.rollback()
+        finally:
+            if conn: conn.close()
+
+
+class FirmaYilDialog(tk.Toplevel):
+    """Firma ve yıl seçimini değiştirmek için kullanılan modal diyalog."""
+
+    def __init__(self, parent, aktif_firma_id, aktif_yil):
+        super().__init__(parent)
+        self.title("Firma ve Yıl Seçimi")
+        self.geometry("420x260")
+        self.transient(parent)
+        self.grab_set()
+        self.result = None
+        self.firma_dict = {}
+        self.aktif_firma_id = aktif_firma_id
+        self.aktif_yil = aktif_yil
+
+        self.create_widgets()
+        self._load_firmalar()
+        self.wait_window(self)
+
+    def create_widgets(self):
+        main_frame = tk.Frame(self, padx=20, pady=20)
+        main_frame.pack(fill="both", expand=True)
+
+        tk.Label(main_frame, text="Firma:", font=("Arial", 10)).pack(anchor="w")
+        self.cmb_firma = ttk.Combobox(main_frame, state="readonly", font=("Arial", 10))
+        self.cmb_firma.pack(fill="x", pady=(5, 10))
+        self.cmb_firma.bind("<<ComboboxSelected>>", lambda e: self._yillari_yukle())
+
+        tk.Label(main_frame, text="Yıl:", font=("Arial", 10)).pack(anchor="w")
+        self.cmb_yil = ttk.Combobox(main_frame, font=("Arial", 10))
+        self.cmb_yil.pack(fill="x", pady=(5, 15))
+
+        btn_frame = tk.Frame(main_frame)
+        btn_frame.pack(fill="x")
+
+        btn_save = tk.Button(
+            btn_frame, text="Seçimi Uygula", command=self.on_select,
+            bg="#0d6efd", fg="white", width=15,
+        )
+        btn_save.pack(side="right")
+
+        btn_cancel = tk.Button(btn_frame, text="İptal", command=self.destroy, width=15)
+        btn_cancel.pack(side="right", padx=10)
+
+    def _load_firmalar(self):
+        conn = veritabani_baglan()
+        cursor = conn.cursor()
+        cursor.execute("SELECT id, firma_adi FROM firmalar WHERE durum=1 ORDER BY firma_adi")
+        rows = cursor.fetchall()
+        conn.close()
+
+        self.firma_dict = {row[1]: row[0] for row in rows}
+        self.cmb_firma['values'] = list(self.firma_dict.keys())
+        for ad, fid in self.firma_dict.items():
+            if fid == self.aktif_firma_id:
+                self.cmb_firma.set(ad)
+                break
+        if not self.cmb_firma.get() and self.firma_dict:
+            self.cmb_firma.set(next(iter(self.firma_dict)))
+
+        self._yillari_yukle()
+
+    def _yillari_yukle(self):
+        secili_firma = self.cmb_firma.get()
+        firma_id = self.firma_dict.get(secili_firma, self.aktif_firma_id)
+
+        yil = datetime.now().year
+        yillar = list(range(yil, yil - 11, -1))
+        conn = veritabani_baglan()
+        cursor = conn.cursor()
+        cursor.execute("SELECT DISTINCT yil FROM fisler WHERE firma_id = ? ORDER BY yil DESC", (firma_id,))
+        for row in cursor.fetchall():
+            if row[0] not in yillar:
+                yillar.append(row[0])
+        cursor.execute("SELECT deger FROM genel_tanimlar WHERE grup = 'Yillar' ORDER BY deger DESC")
+        for row in cursor.fetchall():
+            try:
+                y = int(row[0])
+                if y not in yillar:
+                    yillar.append(y)
+            except ValueError:
+                pass
+        conn.close()
+        yillar.sort(reverse=True)
+        self.cmb_yil['values'] = yillar
+        self.cmb_yil.set(self.aktif_yil)
+
+    def on_select(self):
+        firma_adi = self.cmb_firma.get()
+        yil_text = self.cmb_yil.get().strip()
+
+        if not firma_adi:
+            messagebox.showwarning("Uyarı", "Lütfen bir firma seçin.", parent=self)
+            return
+        if not yil_text:
+            messagebox.showwarning("Uyarı", "Lütfen bir yıl girin.", parent=self)
+            return
+        try:
+            yil = int(yil_text)
+        except ValueError:
+            messagebox.showerror("Hata", "Yıl sayısal olmalıdır.", parent=self)
+            return
+
+        self.result = {
+            "firma_id": self.firma_dict[firma_adi],
+            "firma_adi": firma_adi,
+            "yil": yil,
+        }
+        self.destroy()
+

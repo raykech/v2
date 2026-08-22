@@ -4,6 +4,7 @@ from tkcalendar import DateEntry
 from datetime import datetime
 import re # Kaynak modül ayrıştırması için eklendi
 from modules.kasa.kasa_form import KasaFisiFormu
+from modules.acilis.acilis_form import AcilisFisiFormu
 from core.db import veritabani_baglan
 from ui.widgets.tooltip import Tooltip
 from utils.formatters import format_date, format_currency, parse_currency
@@ -45,6 +46,7 @@ class KasaModulu(tk.Frame):
         self.yeni_fis_menu.add_command(label="Kasa Gider Fişi", command=lambda: self._ac_yeni_fis_formu("Kasa Gider Fişi"))
         self.yeni_fis_menu.add_command(label="Kasa Gelir Fişi", command=lambda: self._ac_yeni_fis_formu("Kasa Gelir Fişi"))
         self.yeni_fis_menu.add_command(label="Kasalar Arası Virman", command=lambda: self._ac_yeni_fis_formu("Kasalar Arası Virman"))
+        self.yeni_fis_menu.add_command(label="Kasa Açılış Fişi", command=lambda: self._ac_yeni_fis_formu("Kasa Açılış Fişi"))
 
         self.btn_duzenle = tk.Button(
             ust_frame,
@@ -97,7 +99,7 @@ class KasaModulu(tk.Frame):
         self.ent_bit_tarih_filtre.pack(side="left", padx=(0, 5))
 
         tk.Label(filter_frame, text="Fiş Türü:", bg="#f5f7fb").pack(side="left", padx=(5, 2))
-        self.cmb_fis_turu_filtre = ttk.Combobox(filter_frame, state="readonly", width=25, values=["Tümü", "Kasa Gider Fişi", "Kasa Gelir Fişi", "Kasalar Arası Virman"])
+        self.cmb_fis_turu_filtre = ttk.Combobox(filter_frame, state="readonly", width=25, values=["Tümü", "Kasa Gider Fişi", "Kasa Gelir Fişi", "Kasalar Arası Virman", "Kasa Açılış Fişi"])
         self.cmb_fis_turu_filtre.set("Tümü")
         self.cmb_fis_turu_filtre.bind("<<ComboboxSelected>>", lambda e: self.listele())
         self.cmb_fis_turu_filtre.pack(side="left", padx=(0, 5))
@@ -236,7 +238,10 @@ class KasaModulu(tk.Frame):
         """Belirtilen fiş türü için yeni fiş formunu açar."""
         # Mevcut liste görünümünü gizle
         self.pack_forget()
-        self.form_instance = KasaFisiFormu(self.parent, self.main_app, self, fis_turu=fis_turu, on_close=self.form_kapatildi)
+        if fis_turu == "Kasa Açılış Fişi":
+            self.form_instance = AcilisFisiFormu(self.parent, self.main_app, self, fis_turu=fis_turu, on_close=self.form_kapatildi)
+        else:
+            self.form_instance = KasaFisiFormu(self.parent, self.main_app, self, fis_turu=fis_turu, on_close=self.form_kapatildi)
         self.form_instance.pack(fill="both", expand=True)
 
     def fis_duzenle(self):
@@ -253,7 +258,10 @@ class KasaModulu(tk.Frame):
         fis_turu = self.tree.item(selected_item, "values")[4]
 
         self.pack_forget()
-        self.form_instance = KasaFisiFormu(self.parent, self.main_app, self, fis_id=fis_id, fis_turu=fis_turu, on_close=self.form_kapatildi)
+        if fis_turu == "Kasa Açılış Fişi":
+            self.form_instance = AcilisFisiFormu(self.parent, self.main_app, self, fis_id=fis_id, fis_turu=fis_turu, on_close=self.form_kapatildi)
+        else:
+            self.form_instance = KasaFisiFormu(self.parent, self.main_app, self, fis_id=fis_id, fis_turu=fis_turu, on_close=self.form_kapatildi)
         self.form_instance.pack(fill="both", expand=True)
 
     def fis_sil(self):

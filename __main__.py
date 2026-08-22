@@ -33,7 +33,7 @@ class GirisPenceresi(tk.Tk):
         self.cmb_firma.bind("<<ComboboxSelected>>", self.firma_secildi)
 
         tk.Label(main_frame, text="Çalışma Yılı:", font=("Arial", 10)).pack(anchor="w")
-        self.cmb_yil = ttk.Combobox(main_frame, state="readonly", font=("Arial", 10))
+        self.cmb_yil = ttk.Combobox(main_frame, font=("Arial", 10))
         self.cmb_yil.pack(fill="x", pady=5)
 
         # Şifre alanı ve Enter tuşu bağlama (v1'deki gibi)
@@ -66,9 +66,30 @@ class GirisPenceresi(tk.Tk):
             self.destroy()
 
     def firma_secildi(self, event=None):
-        # Bu fonksiyon şimdilik boş, yıl seçimi mantığı ana uygulamada olacak
         mevcut_yil = datetime.now().year
-        self.cmb_yil['values'] = [mevcut_yil, mevcut_yil - 1]
+        yillar = list(range(mevcut_yil, mevcut_yil - 11, -1))
+        try:
+            from core.db import veritabani_baglan
+            conn = veritabani_baglan()
+            cursor = conn.cursor()
+            cursor.execute("SELECT DISTINCT yil FROM fisler ORDER BY yil DESC")
+            for row in cursor.fetchall():
+                if row[0] not in yillar:
+                    yillar.append(row[0])
+            cursor.execute("SELECT deger FROM genel_tanimlar WHERE grup = 'Yillar' ORDER BY deger DESC")
+            for row in cursor.fetchall():
+                try:
+                    y = int(row[0])
+                    if y not in yillar:
+                        yillar.append(y)
+                except ValueError:
+                    pass
+            conn.close()
+        except Exception:
+            pass
+        yillar.sort(reverse=True)
+        mevcut_yil = datetime.now().year
+        self.cmb_yil['values'] = yillar
         self.cmb_yil.set(mevcut_yil)
 
     def giris_yap(self, event=None):

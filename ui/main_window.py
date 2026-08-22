@@ -12,7 +12,9 @@ from modules.fatura.fatura_view import FaturaModulu
 from modules.cari.cari_view import CariModulu
 from modules.banka.banka_view import BankaModulu
 from modules.cek_senet.cek_senet_view import CekSenetModulu
+from modules.ayarlar.ayarlar_view import AyarlarModulu
 from ui.widgets.tooltip import Tooltip
+from ui.dialogs import FirmaYilDialog
 
 class AnaPencere(tk.Tk):
     def __init__(self, firma_id, firma_adi, yil):
@@ -57,6 +59,7 @@ class AnaPencere(tk.Tk):
         moduller_menu.add_command(label="Fatura", command=lambda: self._modul_aci("fatura"))
         moduller_menu.add_command(label="Banka", command=lambda: self._modul_aci("banka"))
         moduller_menu.add_command(label="Çek/Senet", command=lambda: self._modul_aci("cek_senet"))
+        moduller_menu.add_command(label="Ayarlar", command=lambda: self._modul_aci("ayarlar"))
         menubar.add_cascade(label="Modüller", menu=moduller_menu)
 
     def _modul_butonlari_olustur(self):
@@ -71,6 +74,7 @@ class AnaPencere(tk.Tk):
             "banka": "Banka",
             "cek_senet": "Çek/Senet",
             "raporlar": "Raporlar",
+            "ayarlar": "Ayarlar",
         }
 
         for key, label in self.module_buttons.items():
@@ -100,9 +104,45 @@ class AnaPencere(tk.Tk):
         status_bar = tk.Frame(self, bg="#4a69bd", height=28)
         status_bar.pack(side="bottom", fill="x")
         
-        status_text = f"Firma: {self.aktif_firma_adi}  |  Çalışma Yılı: {self.aktif_yil}"
-        self.lbl_status = tk.Label(status_bar, text=status_text, bg="#4a69bd", fg="white", font=("Arial", 9, "bold"))
+        status_text = f"Firma: {self.aktif_firma_adi}  |  Çalışma Yılı: {self.aktif_yil}  |  (Tıklayarak değiştir)"
+        self.lbl_status = tk.Label(
+            status_bar,
+            text=status_text,
+            bg="#4a69bd",
+            fg="white",
+            font=("Arial", 9, "bold"),
+            cursor="hand2",
+        )
+        self.lbl_status.bind("<Button-1>", lambda e: self._firma_yil_degistir())
         self.lbl_status.pack(pady=4)
+
+    def _firma_yil_degistir(self):
+        """Status bar tıklanınca firma/yıl seçimini değiştirir."""
+        dialog = FirmaYilDialog(self, self.aktif_firma_id, self.aktif_yil)
+        if not dialog.result:
+            return
+
+        yeni_firma_id = dialog.result["firma_id"]
+        yeni_firma_adi = dialog.result["firma_adi"]
+        yeni_yil = dialog.result["yil"]
+
+        # Aynı firma ve yıl seçildiyse işlem yapma
+        if yeni_firma_id == self.aktif_firma_id and yeni_yil == self.aktif_yil:
+            return
+
+        self.aktif_firma_id = yeni_firma_id
+        self.aktif_firma_adi = yeni_firma_adi
+        self.aktif_yil = yeni_yil
+
+        self.lbl_status.config(
+            text=f"Firma: {self.aktif_firma_adi}  |  Çalışma Yılı: {self.aktif_yil}  |  (Tıklayarak değiştir)"
+        )
+
+        # Tüm açık sekmeleri kapat; yeni firma/yıl ile modüller temiz açılsın
+        for key in list(self.open_tabs.keys()):
+            if key != "giris":
+                self._tab_kapat(key)
+        self._tab_sec("giris")
 
     def _modul_aci(self, modul_key):
         # Şimdilik sadece placeholder olarak çalışacak
@@ -136,6 +176,9 @@ class AnaPencere(tk.Tk):
             module_instance.pack(fill="both", expand=True)
         elif modul_key == "cek_senet":
             module_instance = CekSenetModulu(tab_frame, self)
+            module_instance.pack(fill="both", expand=True)
+        elif modul_key == "ayarlar":
+            module_instance = AyarlarModulu(tab_frame, self)
             module_instance.pack(fill="both", expand=True)
         else:
             tk.Label(tab_frame, text=f"'{self.module_buttons.get(modul_key)}' modülü henüz oluşturulmadı.", font=("Arial", 18), bg="white").pack(expand=True)
@@ -229,6 +272,7 @@ class AnaPencere(tk.Tk):
                 "class_name": "KasaModulu",
                 "dependencies": [
                     "modules.kasa.kasa_form",
+                    "modules.acilis.acilis_form",
                     "ui.widgets.advanced_treeview",
                     "core.services",
                     "utils.formatters",
@@ -296,6 +340,7 @@ class AnaPencere(tk.Tk):
                 "class_name": "CariModulu",
                 "dependencies": [
                     "modules.cari.cari_form",
+                    "modules.acilis.acilis_form",
                     "core.services",
                     "utils.formatters",
                     "ui.widgets.lookup_widget",
@@ -309,6 +354,7 @@ class AnaPencere(tk.Tk):
                 "class_name": "BankaModulu",
                 "dependencies": [
                     "modules.banka.banka_form",
+                    "modules.acilis.acilis_form",
                     "core.services",
                     "utils.formatters",
                     "ui.widgets.lookup_widget",
@@ -328,6 +374,19 @@ class AnaPencere(tk.Tk):
                     "ui.dialogs",
                     "ui.widgets.tooltip",
                     "datetime"
+                ]
+            },
+            "ayarlar": {
+                "main_path": "modules.ayarlar.ayarlar_view",
+                "class_name": "AyarlarModulu",
+                "dependencies": [
+                    "modules.ayarlar.firma_tanimlari_view",
+                    "modules.ayarlar.yil_tanimlari_view",
+                    "core.db",
+                    "core.services",
+                    "ui.dialogs",
+                    "ui.widgets.lookup_widget",
+                    "utils.formatters"
                 ]
             },
             # Gelecekte diğer modüller buraya eklenebilir
@@ -374,13 +433,14 @@ class AnaPencere(tk.Tk):
             return
 
         module_map = {
-            "kasa": {"main_path": "modules.kasa.kasa_view", "class_name": "KasaModulu", "dependencies": ["modules.kasa.kasa_form", "core.services", "utils.formatters", "ui.widgets.lookup_widget", "ui.dialogs", "ui.widgets.tooltip", "re"]},
+            "kasa": {"main_path": "modules.kasa.kasa_view", "class_name": "KasaModulu", "dependencies": ["modules.kasa.kasa_form", "modules.acilis.acilis_form", "core.services", "utils.formatters", "ui.widgets.lookup_widget", "ui.dialogs", "ui.widgets.tooltip", "re"]},
             "tanimlar": {"main_path": "modules.tanimlar.tanimlar_view", "class_name": "TanimlarModulu", "dependencies": ["modules.tanimlar.stok_view", "modules.tanimlar.kasa_view", "modules.tanimlar.cari_view", "modules.tanimlar.hizmet_view", "modules.tanimlar.banka_kurum_view", "modules.tanimlar.banka_hesap_view", "core.services", "utils.formatters", "ui.widgets.lookup_widget", "ui.dialogs", "ui.widgets.tooltip", "re"]},
             "raporlar": {"main_path": "modules.raporlar.raporlar_view", "class_name": "RaporlarModulu", "dependencies": ["modules.raporlar.hesap_ekstresi_view", "modules.raporlar.stok_durum_raporu_view", "modules.raporlar.hizmet_kartlari_raporu_view", "modules.raporlar.cek_senet_raporlari_view", "modules.raporlar.cek_senet_portfoy_raporu_view", "modules.raporlar.cek_senet_vade_raporu_view", "modules.raporlar.cek_senet_seruven_raporu_view", "modules.raporlar.cek_senet_cari_raporu_view", "core.services", "utils.formatters", "ui.widgets.lookup_widget", "ui.dialogs", "utils.export", "datetime", "ui.widgets.tooltip"]},
                         "fatura": {"main_path": "modules.fatura.fatura_view", "class_name": "FaturaModulu", "dependencies": ["modules.fatura.fatura_form", "core.services", "utils.formatters", "ui.widgets.lookup_widget", "ui.dialogs", "utils.export", "uuid", "ui.widgets.tooltip", "re"]},
-            "cari": {"main_path": "modules.cari.cari_view", "class_name": "CariModulu", "dependencies": ["modules.cari.cari_form", "core.services", "utils.formatters", "ui.widgets.lookup_widget", "ui.dialogs"]},
-            "banka": {"main_path": "modules.banka.banka_view", "class_name": "BankaModulu", "dependencies": ["modules.banka.banka_form", "core.services", "utils.formatters", "ui.widgets.lookup_widget", "ui.dialogs"]},
+            "cari": {"main_path": "modules.cari.cari_view", "class_name": "CariModulu", "dependencies": ["modules.cari.cari_form", "modules.acilis.acilis_form", "core.services", "utils.formatters", "ui.widgets.lookup_widget", "ui.dialogs"]},
+            "banka": {"main_path": "modules.banka.banka_view", "class_name": "BankaModulu", "dependencies": ["modules.banka.banka_form", "modules.acilis.acilis_form", "core.services", "utils.formatters", "ui.widgets.lookup_widget", "ui.dialogs"]},
             "cek_senet": {"main_path": "modules.cek_senet.cek_senet_view", "class_name": "CekSenetModulu", "dependencies": ["modules.cek_senet.cek_senet_form", "core.services", "utils.formatters", "ui.widgets.lookup_widget", "ui.dialogs", "ui.widgets.tooltip", "datetime"]},
+            "ayarlar": {"main_path": "modules.ayarlar.ayarlar_view", "class_name": "AyarlarModulu", "dependencies": ["modules.ayarlar.firma_tanimlari_view", "modules.ayarlar.yil_tanimlari_view", "core.db", "core.services", "ui.dialogs", "ui.widgets.lookup_widget", "utils.formatters"]},
             # Gelecekte diğer modüller buraya eklenebilir
         }
 

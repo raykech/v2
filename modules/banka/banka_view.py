@@ -3,6 +3,7 @@ from tkinter import ttk, messagebox
 from tkcalendar import DateEntry
 from datetime import datetime
 from modules.banka.banka_form import BankaFisiFormu
+from modules.acilis.acilis_form import AcilisFisiFormu
 from core.db import veritabani_baglan
 from ui.widgets.tooltip import Tooltip
 from utils.formatters import format_date, format_currency
@@ -20,6 +21,7 @@ class BankaModulu(tk.Frame):
         "Bankadan Çekilen",
         "Gelen Banka Transferi",
         "Giden Banka Transferi",
+        "Banka Açılış Fişi",
     ]
 
     def __init__(self, parent, main_app):
@@ -232,9 +234,14 @@ class BankaModulu(tk.Frame):
 
     def _ac_yeni_fis_formu(self, fis_turu):
         self.pack_forget()
-        self.form_instance = BankaFisiFormu(
-            self.parent, self.main_app, self, fis_turu=fis_turu, on_close=self.form_kapatildi,
-        )
+        if fis_turu == "Banka Açılış Fişi":
+            self.form_instance = AcilisFisiFormu(
+                self.parent, self.main_app, self, fis_turu=fis_turu, on_close=self.form_kapatildi,
+            )
+        else:
+            self.form_instance = BankaFisiFormu(
+                self.parent, self.main_app, self, fis_turu=fis_turu, on_close=self.form_kapatildi,
+            )
         self.form_instance.pack(fill="both", expand=True)
 
     def fis_duzenle(self):
@@ -251,9 +258,14 @@ class BankaModulu(tk.Frame):
         fis_turu = self.tree.item(selected_item, "values")[4]
 
         self.pack_forget()
-        self.form_instance = BankaFisiFormu(
-            self.parent, self.main_app, self, fis_id=fis_id, fis_turu=fis_turu, on_close=self.form_kapatildi,
-        )
+        if fis_turu == "Banka Açılış Fişi":
+            self.form_instance = AcilisFisiFormu(
+                self.parent, self.main_app, self, fis_id=fis_id, fis_turu=fis_turu, on_close=self.form_kapatildi,
+            )
+        else:
+            self.form_instance = BankaFisiFormu(
+                self.parent, self.main_app, self, fis_id=fis_id, fis_turu=fis_turu, on_close=self.form_kapatildi,
+            )
         self.form_instance.pack(fill="both", expand=True)
 
     def fis_sil(self):
