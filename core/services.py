@@ -222,6 +222,24 @@ def kaydet_kart(cursor, tablo_adi, veri_sozlugu):
 
 
 # ---------------------------------------------------------------- KDV yardımcılar
+def aktif_yil_kontrolu(tarih_nesnesi, aktif_yil):
+    """
+    Fiş tarihinin yılının, seçili çalışma yılı ile aynı olup olmadığını kontrol eder.
+    Uygun değilse açıklayıcı hata mesajı döndürür; uygunsa None döndürür.
+    Amaç: 2025 yılında çalışırken yanlışlıkla 2026 tarihli fiş girilmesini engellemek
+    (aksi halde fiş, 2025 kayıtlarından silinip dönem dışına taşınmış olur).
+    """
+    if tarih_nesnesi is None:
+        return "Tarih seçilmedi."
+    if tarih_nesnesi.year != aktif_yil:
+        return (
+            f"Girilen tarih ({tarih_nesnesi.strftime('%d.%m.%Y')}), seçili çalışma yılından "
+            f"({aktif_yil}) farklı. Fiş, {aktif_yil} yılı kayıtlarından çıkar ve dönem dışında görünür. "
+            f"Lütfen tarihi {aktif_yil} yılı içinden seçin."
+        )
+    return None
+
+
 def kdv_hesap_idleri(cursor, firma_id):
     """
     Firma için tanımlı KDV hesaplarının ID'lerini döndürür.

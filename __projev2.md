@@ -60,7 +60,8 @@ modules/
     banka_kurum_view.py     Banka kurum tanımı
     banka_hesap_view.py     Banka hesap tanımı
     tanim_import.py         Tanım kartları (Cari, Stok, Hizmet, Kasa, Banka) Excel import
-  raporlar/                 Raporlar
+  raporlar/                 Raporlar (hesap ekstreleri, stok raporları, KDV Raporu)
+    kdv_raporu_view.py      KDV Raporu (191 İndirilecek / 391 Hesaplanan)
   ayarlar/                  Ayarlar (firma, yıl)
 ui/
   main_window.py            Ana pencere, sekmeler, F5 ile yeniden yükleme
@@ -150,16 +151,58 @@ utils/
 ## 4. Ortak İş Mantığı (`core/services.py`)
 
 - `fis_kaydet(...)` – Yeni fiş + satırlar + opsiyonel peşin ödeme fişi kaydeder.
-- `fis_guncelle(...)` – Fişi ve satırlarını günceller, eski peşin ödeme fişini siler.
+- `fis_guncelle(...)` – Fişi ve satırlarını günceller, eski peşin ödeme fişini siler. (`yil` UPDATE'te de set edilir)
 - `fis_sil(...)` – Fişi ve bağlı satırları siler.
 - `kaydet_kart(...)` / `kart_sil(...)` – Tanım kartlarını ekler/günceller/siler.
 - `is_kart_kullanilmis_mi(...)` – Kartın fişlerde kullanılıp kullanılmadığını kontrol eder.
+- **KDV yardımcıları:**
+  - `kdv_hesap_idleri(cursor, firma_id)` – Firmanın 191/391 KDV hesap ID'lerini döndürür `(indirilecek, hesaplanan)`.
+  - `kdv_satiri_olustur(kdv_hesap_id, kdv_tutar, yon, aciklama)` – KDV için ayrı fiş satırı üretir (`yon`: `'borc'` → 191, `'alacak'` → 391).
+- **Dönem kontrolü:**
+  - `aktif_yil_kontrolu(tarih_nesnesi, aktif_yil)` – Fiş tarihi seçili çalışma yılı dışındaysa açıklayıcı hata mesajı döndürür, uygunsa `None`. Tüm fiş formları kaydetmeden önce bu kontrolü yapar (yanlış yıla fiş taşınmasını engeller).
 - Çek/Senet yardımcıları:
   - `cek_senet_guncel_durum`
   - `cek_senet_son_banka_takas`
   - `cek_senet_fis_son_hareket_mi`
   - `cek_senet_hareket_ekle`
   - `cek_senet_fis_sil`
+
+---
+
+## 4.1. KDV Modeli (Ayrı Satır / 191-391)
+
+KDV, satır tutarına gömülmez; **ayrı bir fiş satırı** olarak kaydedilir. Bu, her fişin
+borç toplamı = alacak toplamı şeklinde dengede kalmasını sağlar.
+
+**Temel kural:**
+- Net satır (KDV hariç) → satırın yönünde yazılır (Stok/Hizmet/Gelir/Gider kartı)
+- KDV satırı → net satırla **aynı yönde**, `191 İndirilecek KDV` (borç) veya `391 Hesaplanan KDV` (alacak)
+- Karşı satır (Cari / Kasa / Banka) → **brüt** (KDV dahil), ters yönde
+- Sonuç: `net + KDV = brüt` → borç = alacak
+
+**KDV hesabı seçimi (yöne göre):**
+- Satır borçlu ise → 191 İndirilecek KDV (borç)
+- Satır alacaklı ise → 391 Hesaplanan KDV (alacak)
+
+| Fatura / Fiş | Satır (net) | KDV satırı | Karşı (brüt) |
+|---|---|---|---|
+| Satış Faturası (Vadeli) | Stok/Hizmet **alacak** | 391 **alacak** | Cari **borç** |
+| Alış Faturası (Vadeli) | Stok/Hizmet **borç** | 191 **borç** | Cari **alacak** |
+| Satış İade | Stok/Hizmet **borç** | 191 **borç** | Cari **alacak** |
+| Alış İade | Stok/Hizmet **alacak** | 391 **alacak** | Cari **borç** |
+| Kasa/Banka Gider | Gider kartı **borç** | 191 **borç** | Kasa/Banka **alacak** |
+| Kasa Gelir | Gelir kartı **alacak** | 391 **alacak** | Kasa **borç** |
+| Peşin Fatura | Stok/Hizmet (tek yön) + KDV (aynı yön) | — | Ayrı peşin fişinde Kasa/Banka (brüt) |
+
+**Notlar:**
+- Peşin faturalarda KDV, ana fatura fişinde üretilir; ödeme fişi brüt tutarı taşır (birlikte denge).
+- **Banka gider/gelir fişleri KDV'sizdir** — KDV alanı ve hesaplaması banka formunda yoktur, `KDV %` sütunu importta yok sayılır.
+- Excel importta **"Tutar" sütunu her zaman nettir** (KDV hariç); KDV satırı sistem tarafından üretilir.
+
+**Akıllı giriş (Tutar KDV Dahil):**
+- Kasa ve Fatura formlarında giriş satırındaki **"Tutar (KDV Dahil)"** alanı doldurulursa
+  birim fiyat otomatik hesaplanır: `birim_fiyat = tutar / (miktar × (1 + KDV%/100))`.
+- Bu alan doluysa satır eklerken birim fiyat yerine bu tutar esas alınır.
 
 ---
 
@@ -177,12 +220,15 @@ Fiş türleri:
 - Gider/Gelir fişlerinde Hizmet kartı satırları + Kasa karşı satırı
 - Virman fişinde satır listesi gizlenir; kaynak kasa, hedef kasa ve tutar alanları kullanılır
 - KDV otomatik dolum ve anında satır toplamı hesabı
+- **KDV ayrı satır**: Gider/Gelir fişlerinde KDV, net satırla aynı yönde 191/391 hesabına ayrı satır olarak yazılır (fiş dengelenir)
+- **Akıllı giriş**: "Tutar (KDV Dahil)" alanından birim fiyat otomatik hesaplanır
 
 **Excel İçe Aktarma (`kasa_import.py`)**
 - Template sayfası: "Kasa İşlemleri" + "Açıklama"
 - Sütunlar: Fiş Türü, Tarih, Fiş No, Genel Açıklama, Kasa / Ana Kasa, Hedef Kasa, Gider/Gelir Kartı, Yön, Satır Açıklaması, Miktar, Birim Fiyat, KDV %, Tutar
 - Gruplama: Aynı Fiş No + Tarih + Kasa satırları tek fişte toplanır. Fiş No boşsa her satır ayrı fiş.
 - KDV % boş bırakılırsa 0 kabul edilir.
+- **Tutar sütunu nettir** (KDV hariç); KDV ayrı satır olarak otomatik üretilir.
 
 ### 5.2. Banka
 
@@ -203,6 +249,7 @@ Fiş türleri:
 - POS hesapları ile normal banka hesapları ayrıştırılır
 - Bankaya Yatan / Bankadan Çekilen işlemlerinde karşı hesap Kasa'dır
 - Gelen/Giden Transfer işlemlerinde karşı hesap Cari'dir
+- **Banka gider/gelir fişleri KDV'sizdir** (KDV alanı yoktur; importta `KDV %` sütunu yok sayılır)
 
 **Excel İçe Aktarma (`banka_import.py`)**
 - Template sayfası: "Banka İşlemleri" + "Açıklama"
@@ -210,6 +257,7 @@ Fiş türleri:
 - Blokeyi Bankaya Aktar: Ana Banka POS, Hedef normal banka hesabı olmalıdır.
 - Bankaya Yatan / Bankadan Çekilen: Ana Banka normal (Vadesiz), karşı hesap Kasa.
 - Gelen/Giden Transfer: Ana Banka normal (Vadesiz), karşı hesap Cari.
+- Banka işlemleri KDV'sizdir; `KDV %` sütunu dikkate alınmaz.
 
 ### 5.3. Cari
 
@@ -251,15 +299,19 @@ Fiş türleri:
 
 Özellikler:
 - Stoklu ve hizmetli fatura desteği
-- İade faturalarında borç/alacak yönü otomatik ters çevrilir
+- İade faturalarında borç/alacak yönü otomatik ters çevrilir (`is_satis`/`is_iade` mantığı — "Hizmet Satış Faturası" gibi türlerde de doğru çalışır)
 - Peşin ödemelerde `kaynak_modul='Fatura'` ve `kaynak_fis_id=<fatura_id>` ile bağlı Kasa/Banka fişi oluşturulur
 - KDV otomatik dolum ve satır toplamı hesabı
+- **KDV ayrı satır**: fatura satırı net, KDV 191/391 hesabına ayrı satır olarak yazılır; cari karşılığı brüt → fiş dengelenir
+- **Akıllı giriş**: "Tutar (KDV Dahil)" alanından birim fiyat otomatik hesaplanır
+- Peşin ödeme yönü: Satış (iade değil) ve Alış İade → **Tahsilat**; Alış (iade değil) ve Satış İade → **Ödeme**
 
 **Excel İçe Aktarma (`fatura_import.py`)**
 - Template sayfası: "Fatura İşlemleri" + "Açıklama"
 - Sütunlar: Fiş Türü, Tarih, Fatura No, Açıklama, Cari, Ödeme Tipi, Ödeme Hesabı, Stok/Hizmet Adı, Satır Açıklaması, Miktar, Birim Fiyat, KDV %, Tutar
 - Vadeli faturalarda Cari zorunludur; Nakit/Banka/POS faturalarında Ödeme Hesabı zorunludur.
 - Hizmet faturalarında Miktar kullanılmaz (otomatik 1).
+- **Tutar sütunu nettir** (KDV hariç); KDV ayrı satır olarak otomatik üretilir.
 
 ### 5.5. Çek/Senet
 
@@ -308,12 +360,16 @@ Tanımlar notebook'u şu sekmelerden oluşur:
 - Stok Kartları
 - Cari Kartları
 - Kasa Kartları
-- Hizmet Kartları (Gider/Gelir + Grup)
+- Hizmet Kartları (Gider/Gelir/KDV + Grup)
 - Banka Hesapları
 - Banka Kurumları
 - **Excel Yükle** (en son sekme) – Tanım kartlarını Excel'den toplu içe aktarır.
 
 Tanımlar sekmeler arası geçişte otomatik yenilenir.
+
+> Not: `191 İndirilecek KDV` ve `391 Hesaplanan KDV` kartları ile "KDV" grubu, veritabanı
+> şeması kurulurken (`core/db.py`) otomatik oluşturulur; elle silinmemeli/düzenlenmemelidir
+> (fiş satırlarında kullanıldıkları için kullanımda olan kart silinemez).
 
 **Excel İçe Aktarma (`tanim_import.py`)**
 - "Excel Yükle" sekmesinden erişilir.
@@ -332,6 +388,7 @@ Rapor sekmeleri:
 - Banka Ekstre
 - Hizmet Kartları Raporu
 - Hizmet Kartları Detay
+- **KDV Raporu** – 191 İndirilecek / 391 Hesaplanan hareketlerini tarih aralığıyla listeler; aylık alt toplamlar, genel toplamlar ve **"Ödenecek/Devreden KDV (391 − 191)"** farkını gösterir
 
 Raporlar **Excel (.xlsx)** ve **PDF** olarak dışa aktarılabilir.
 
@@ -391,6 +448,10 @@ Veritabanı `core/db.py` çalıştırıldığında `on_muhasebe.db` olarak otoma
 4. Yeni kart ekleme işlemlerinde `ui/dialogs.py` içindeki `ac_kart_dialog` kullanılır.
 5. Tüm kayıtlarda `firma_id` ve `yil` bilgisi korunmalıdır.
 6. Çek/Senet seçimlerinde LookupWidget'tan dönen ID string olabilir; veri sözlüğü anahtarları integer olduğundan `int()` çevrimi yapılmalıdır.
+7. KDV'li fiş üreten her yerde KDV ayrı satırı `kdv_satiri_olustur(...)` ile üretilir; hesap ID'leri `kdv_hesap_idleri(...)` ile alınır. Satır net, karşı satır brüt, KDV aynı yönde yazılır.
+8. Düzenleme modunda fiş yüklerken KDV hesap satırları (191/391) normal satır listesine alınmaz; kaydederken yeniden üretilir.
+9. KDV kartları (`tur='KDV'`) normal Gider/Gelir lookup'larında gösterilmez (tür filtresi).
+10. Fiş tarihi seçili çalışma yılı dışında olamaz; tüm fiş formları kaydetmeden önce `aktif_yil_kontrolu(...)` ile bunu engeller. Importta dönem dışı satırlar uyarı ile kaydedilir.
 
 ---
 
@@ -398,12 +459,17 @@ Veritabanı `core/db.py` çalıştırıldığında `on_muhasebe.db` olarak otoma
 
 Tamamlanan modüller:
 - Kasa (manuel + Excel import)
-- Banka (manuel + Excel import)
+- Banka (manuel + Excel import – KDV'siz)
 - Cari (manuel + Excel import)
-- Fatura (manuel + Excel import)
+- Fatura (manuel + Excel import – KDV ayrı satır)
 - Çek/Senet (manuel + Excel import – Giriş ve Açılış)
 - Tanımlar (manuel + Excel import – Cari, Stok, Hizmet, Kasa, Banka)
-- Raporlar
+- Raporlar (Stok/Cari/Kasa/Banka Ekstre, Stok Durum, Hizmet Kartları, **KDV Raporu**)
+
+Tamamlanan sistemler:
+- **KDV modeli**: 191 İndirilecek / 391 Hesaplanan KDV hesapları otomatik oluşturulur;
+  Kasa ve Fatura fişlerinde KDV ayrı satır olarak kaydedilir; Banka KDV'sizdir.
+- **Akıllı giriş**: Kasa ve Fatura formlarında "Tutar (KDV Dahil)" girişiyle birim fiyat otomatik hesaplanır.
 
 Uygulama, tek kullanıcılı yerel ön muhasebe işlemlerini fiş bazlı olarak yönetebilecek durumdadır.
 Tüm modüller Excel import desteğine sahiptir.

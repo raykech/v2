@@ -4,7 +4,7 @@ from tkcalendar import DateEntry
 from datetime import datetime
 import uuid
 from core.db import veritabani_baglan
-from core.services import fis_kaydet, fis_guncelle, kdv_satiri_olustur
+from core.services import fis_kaydet, fis_guncelle, kdv_satiri_olustur, aktif_yil_kontrolu
 from utils.formatters import format_currency, parse_currency, CurrencyFormatter, format_miktar
 from ui.widgets.lookup_widget import LookupWidget
 from ui.dialogs import ac_kart_dialog
@@ -594,6 +594,12 @@ class FaturaFormu(tk.Frame):
     def kaydet(self):
         cari_id = self.lookup_cari.get()
         odeme_tipi = self.cmb_odeme_tipi.get()
+
+        # Dönem dışı tarih engeli: fiş, seçili yıl dışında bir tarihe yazılamaz
+        yil_hata = aktif_yil_kontrolu(self.ent_tarih.get_date(), self.main_app.aktif_yil)
+        if yil_hata:
+            messagebox.showwarning("Dönem Dışı Tarih", yil_hata, parent=self)
+            return
 
         if odeme_tipi == "Vadeli" and not cari_id: 
             messagebox.showwarning("Uyarı", "Vadeli işlem için lütfen bir cari hesap seçin.", parent=self)

@@ -7,6 +7,7 @@ from core.services import (
     fis_kaydet,
     fis_guncelle,
     cek_senet_hareket_ekle,
+    aktif_yil_kontrolu,
 )
 from ui.dialogs import ac_kart_dialog
 from ui.widgets.lookup_widget import LookupWidget
@@ -741,6 +742,12 @@ class CekSenetFisiFormu(tk.Frame):
         return ilk
 
     def fis_kaydet(self):
+        # Dönem dışı tarih engeli
+        yil_hata = aktif_yil_kontrolu(self.ent_tarih.get_date(), self.main_app.aktif_yil)
+        if yil_hata:
+            messagebox.showwarning("Dönem Dışı Tarih", yil_hata, parent=self)
+            return
+
         if not self.satirlar:
             messagebox.showwarning("Eksik Bilgi", "Fişe en az bir satır eklemelisiniz.", parent=self)
             return
