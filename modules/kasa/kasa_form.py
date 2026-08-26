@@ -6,7 +6,7 @@ from core.db import veritabani_baglan
 from core.services import fis_kaydet, fis_guncelle
 from ui.dialogs import ac_kart_dialog
 from ui.widgets.lookup_widget import LookupWidget
-from utils.formatters import CurrencyFormatter, parse_currency
+from utils.formatters import CurrencyFormatter, parse_currency, format_miktar
 
 
 class KasaFisiFormu(tk.Frame):
@@ -101,7 +101,7 @@ class KasaFisiFormu(tk.Frame):
         self.btn_satir_ekle = tk.Button(self.entry_row_frame, text="+", command=self.satir_ekle, font=("Arial", 9, "bold"), width=3)
 
         # 1. CurrencyFormatter'ları oluştur
-        CurrencyFormatter(self.ent_miktar, on_change_callback=self.hesapla_satir_toplami)
+        CurrencyFormatter(self.ent_miktar, on_change_callback=self.hesapla_satir_toplami, decimal_places=4, trim_sifir=True)
         CurrencyFormatter(self.ent_birim_fiyat, on_change_callback=self.hesapla_satir_toplami)
         CurrencyFormatter(self.ent_kdv_oran, on_change_callback=self.hesapla_satir_toplami)
         CurrencyFormatter(self.ent_virman_tutar)
@@ -470,7 +470,7 @@ class KasaFisiFormu(tk.Frame):
                     self.duzenlenen_satir_id,
                     values=(
                         hesap_adi, aciklama,
-                        f"{miktar:,.2f}", f"{birim_fiyat:,.2f}",
+                        format_miktar(miktar), f"{birim_fiyat:,.2f}",
                         f"{kdv_tutar:,.2f}", f"{genel_toplam:,.2f}", "❌"
                     )
                 )
@@ -478,7 +478,7 @@ class KasaFisiFormu(tk.Frame):
                 print(f"Düzenleme hatası: {e}")
                 item_id = self.tree_satirlar.insert("", "end", values=(
                     hesap_adi, aciklama,
-                    f"{miktar:,.2f}", f"{birim_fiyat:,.2f}",
+                    format_miktar(miktar), f"{birim_fiyat:,.2f}",
                     f"{kdv_tutar:,.2f}", f"{genel_toplam:,.2f}", "❌"
                 ))
                 self.satirlar[item_id] = yeni_satir_verisi
@@ -490,7 +490,7 @@ class KasaFisiFormu(tk.Frame):
                 "", "end", iid=item_id,
                 values=(
                     hesap_adi, aciklama,
-                    f"{miktar:,.2f}", f"{birim_fiyat:,.2f}",
+                    format_miktar(miktar), f"{birim_fiyat:,.2f}",
                     f"{kdv_tutar:,.2f}", f"{genel_toplam:,.2f}", "❌"
                 )
             )
@@ -548,7 +548,7 @@ class KasaFisiFormu(tk.Frame):
             self.ent_satir_aciklama.delete(0, tk.END)
             self.ent_satir_aciklama.insert(0, satir_verisi['aciklama'])
             self.ent_miktar.delete(0, tk.END)
-            self.ent_miktar.insert(0, f"{satir_verisi['miktar']:.2f}".replace('.', ','))
+            self.ent_miktar.insert(0, format_miktar(satir_verisi['miktar']))
             self.ent_birim_fiyat.delete(0, tk.END)
             self.ent_birim_fiyat.insert(0, f"{satir_verisi['birim_fiyat']:.2f}".replace('.', ','))
             self.ent_kdv_oran.delete(0, tk.END)
@@ -747,7 +747,7 @@ class KasaFisiFormu(tk.Frame):
                             "", "end", iid=item_id,
                             values=(
                                 hesap_adi, satir_data['aciklama'],
-                                f"{miktar:,.2f}", f"{birim_fiyat:,.2f}",
+                                format_miktar(miktar), f"{birim_fiyat:,.2f}",
                                 f"{kdv_tutar:,.2f}", f"{genel_toplam:,.2f}", "❌"
                             )
                         )

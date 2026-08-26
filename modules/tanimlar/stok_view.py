@@ -3,7 +3,7 @@ from tkinter import ttk, messagebox
 import sqlite3
 from core.db import veritabani_baglan
 from core.services import kart_sil as kart_sil_service, kaydet_kart
-from utils.formatters import format_currency, parse_currency
+from utils.formatters import format_currency, parse_currency, format_miktar
 from ui.widgets.lookup_widget import LookupWidget
 from ui.dialogs import ac_kart_dialog
 
@@ -274,7 +274,7 @@ class StokTanimView(tk.Frame):
                 self.tree.insert("", "end", values=(
                     stok_id, stok_kodu, stok_adi, kategori, birim,
                     f"{kdv_oran or 0:g}",
-                    f"{mevcut_miktar:,.2f}".replace(",", "X").replace(".", ",").replace("X", "."), 
+                    format_miktar(mevcut_miktar), 
                     format_currency(kalan_maliyet),
                     format_currency(alis_fiyati), format_currency(satis_fiyati)
                 ), tags=tuple(tags))

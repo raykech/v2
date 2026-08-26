@@ -1,0 +1,1 @@
+# Geçici test dosyası - silinebilir.

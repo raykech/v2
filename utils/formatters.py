@@ -26,17 +26,50 @@ def parse_currency(text_value):
     except (ValueError, TypeError):
         return 0.0
 
+def format_miktar(miktar):
+    """
+    Miktar değerini anlamlı şekilde formatlar; gereksiz sondaki sıfırları göstermez.
+    150 -> "150", 150.2 -> "150,2", 0.8622 -> "0,8622", 1234.5 -> "1.234,5"
+    """
+    if miktar is None:
+        return ""
+    try:
+        deger = float(miktar)
+    except (ValueError, TypeError):
+        return str(miktar)
+    if deger == int(deger):
+        return f"{int(deger):,}".replace(",", ".")
+    # Ondalıklı: gereksiz sondaki sıfırları at (örn 150.2000 -> 150.2)
+    s = f"{deger:.10f}".rstrip("0").rstrip(".")
+    if "." not in s:
+        return f"{int(float(s)):,}".replace(",", ".")
+    tam, ondalik = s.split(".")
+    tam = f"{int(tam):,}".replace(",", ".")
+    return f"{tam},{ondalik}"
+
 class CurrencyFormatter:
     """
     Bir Entry widget'ına bağlanarak kullanıcı yazdıkça para formatlaması yapar.
+    decimal_places: ondalık basamak sayısı. Para alanları için 2, miktar alanları
+    için daha yüksek (örn. 4) kullanılabilir.
+    trim_sifir: True ise gösterimde (FocusOut/set_value) gereksiz sondaki sıfırlar
+    atılır (miktar alanları için idealdir: 150 -> "150").
     """
-    def __init__(self, entry_widget, on_change_callback=None):
+    def __init__(self, entry_widget, on_change_callback=None, decimal_places=2, trim_sifir=False):
         self.widget = entry_widget
+        self.decimal_places = decimal_places
+        self.trim_sifir = trim_sifir
         self.widget.bind("<KeyRelease>", self._on_key_release)
         self.widget.bind("<FocusOut>", self._on_focus_out)
         self.widget.bind("<FocusIn>", self._on_focus_in)
         self.on_change_callback = on_change_callback
         self._suspend_updates = False
+
+    def _format_deger(self, numeric_value):
+        """Gösterimde kullanılacak formatlı metni döndürür."""
+        if self.trim_sifir:
+            return format_miktar(numeric_value)
+        return f"{numeric_value:,.{self.decimal_places}f}".replace(",", "X").replace(".", ",").replace("X", ".")
 
     def set_value(self, value, trigger_callback=False):
         """Programatik değer atamada formatlama ve callback'i pasif hale getirir."""
@@ -58,7 +91,7 @@ class CurrencyFormatter:
                     numeric_value = float(normalized)
                 except ValueError:
                     numeric_value = parse_currency(raw_text)
-                formatted = f"{numeric_value:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+                formatted = self._format_deger(numeric_value)
 
             self.widget.delete(0, tk.END)
             self.widget.insert(0, formatted)
@@ -88,7 +121,7 @@ class CurrencyFormatter:
             formatted_integer = "0" if ',' in current_text else ""
 
         if ',' in current_text:
-            decimal_part_str = decimal_part_str[:2]
+            decimal_part_str = decimal_part_str[:self.decimal_places]
             new_text = f"{formatted_integer},{decimal_part_str}"
         else:
             new_text = formatted_integer
@@ -105,7 +138,7 @@ class CurrencyFormatter:
     def _on_focus_out(self, event):
         current_value = parse_currency(self.widget.get())
         self.widget.delete(0, tk.END)
-        self.widget.insert(0, f"{current_value:,.2f}".replace(",", "X").replace(".", ",").replace("X", "."))
+        self.widget.insert(0, self._format_deger(current_value))
 
     def _on_focus_in(self, event):
         if self.widget.get() == "0,00":

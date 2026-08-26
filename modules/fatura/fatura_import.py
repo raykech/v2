@@ -307,6 +307,7 @@ def fatura_import_dogrula(satirlar, firma_id, aktif_yil):
     """
     hatalar = []
     uyarilar = []
+    farkli_yillar = set()
     gruplar = {}
 
     conn = veritabani_baglan()
@@ -338,6 +339,9 @@ def fatura_import_dogrula(satirlar, firma_id, aktif_yil):
             if not tarih:
                 hatalar.append(f"Satır {row_no}: Tarih geçersiz veya boş.")
                 continue
+
+            if int(tarih[:4]) != aktif_yil:
+                farkli_yillar.add(int(tarih[:4]))
 
             fis_no = satir.get("Fatura No", "")
             genel_aciklama = satir.get("Açıklama", "")
@@ -534,7 +538,7 @@ def fatura_import_dogrula(satirlar, firma_id, aktif_yil):
                 "kaynak_modul": "Fatura",
                 "aciklama": f"Fatura No: {grup['fis_no']} peşin ödemesi",
                 "firma_id": firma_id,
-                "yil": int(tarih[:4]),
+                "yil": int(grup["tarih"][:4]),
             }
             pesin_odeme_data["satirlar"] = list(grup["fis_satirlari"])
             pesin_odeme_data["satirlar"].append({
@@ -553,7 +557,7 @@ def fatura_import_dogrula(satirlar, firma_id, aktif_yil):
             "cari_id": cari_id if grup["odeme_tipi"] == "Vadeli" else None,
             "toplam_tutar": toplam,
             "firma_id": firma_id,
-            "yil": int(tarih[:4]),
+            "yil": int(grup["tarih"][:4]),
         }
 
         hazir_faturalar.append({
@@ -569,6 +573,12 @@ def fatura_import_dogrula(satirlar, firma_id, aktif_yil):
             "odeme_hesap_adi": grup["odeme_hesap_adi"],
             "toplam_tutar": toplam,
         })
+
+    for farkli_yil in sorted(farkli_yillar):
+        uyarilar.append(
+            f"Seçili yıl ({aktif_yil}) dışında {farkli_yil} yılına ait satırlar bulundu. "
+            f"Bu satırlar {farkli_yil} yılı olarak kaydedilecek."
+        )
 
     return hazir_faturalar, hatalar, uyarilar
 

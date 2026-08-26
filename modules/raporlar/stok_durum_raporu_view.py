@@ -1,7 +1,7 @@
 import tkinter as tk
 from tkinter import ttk, messagebox
 from core.db import veritabani_baglan
-from utils.formatters import format_currency
+from utils.formatters import format_currency, format_miktar
 from utils.export import export_treeview_data
 
 class StokDurumRaporuView(tk.Frame):
@@ -136,7 +136,7 @@ class StokDurumRaporuView(tk.Frame):
                 
                 self.tree.insert("", "end", values=(
                     stok_id, stok_kodu, stok_adi, kategori, birim, 
-                    f"{mevcut_miktar:,.2f}".replace(",", "X").replace(".", ",").replace("X", "."), 
+                    format_miktar(mevcut_miktar), 
                     format_currency(kalan_maliyet)
                 ), tags=tags)
 

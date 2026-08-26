@@ -183,6 +183,7 @@ def _cek_senet_seri_no_kontrol(cursor, seri_no, firma_id):
 def cek_senet_import_dogrula(satirlar, firma_id, aktif_yil):
     hatalar = []
     uyarilar = []
+    farkli_yillar = set()
     hazir_fisler = []
 
     conn = veritabani_baglan()
@@ -213,6 +214,9 @@ def cek_senet_import_dogrula(satirlar, firma_id, aktif_yil):
             if not tarih:
                 hatalar.append(f"Satır {row_no}: Tarih geçersiz.")
                 continue
+
+            if int(tarih[:4]) != aktif_yil:
+                farkli_yillar.add(int(tarih[:4]))
 
             seri_no = satir.get("Seri No", "")
             if not seri_no:
@@ -337,6 +341,12 @@ def cek_senet_import_dogrula(satirlar, firma_id, aktif_yil):
 
     finally:
         conn.close()
+
+    for farkli_yil in sorted(farkli_yillar):
+        uyarilar.append(
+            f"Seçili yıl ({aktif_yil}) dışında {farkli_yil} yılına ait satırlar bulundu. "
+            f"Bu satırlar {farkli_yil} yılı olarak kaydedilecek."
+        )
 
     return hazir_fisler, hatalar, uyarilar
 

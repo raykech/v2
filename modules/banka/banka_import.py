@@ -339,6 +339,7 @@ def banka_import_dogrula(satirlar, firma_id, aktif_yil):
     """
     hatalar = []
     uyarilar = []
+    farkli_yillar = set()
     gruplar = {}
 
     conn = veritabani_baglan()
@@ -370,6 +371,9 @@ def banka_import_dogrula(satirlar, firma_id, aktif_yil):
             if not tarih:
                 hatalar.append(f"Satır {row_no}: Tarih geçersiz veya boş.")
                 continue
+
+            if int(tarih[:4]) != aktif_yil:
+                farkli_yillar.add(int(tarih[:4]))
 
             ana_banka_adi = satir.get("Ana Banka", "")
             if not ana_banka_adi:
@@ -644,7 +648,7 @@ def banka_import_dogrula(satirlar, firma_id, aktif_yil):
             "toplam_tutar": grup["toplam_tutar"],
             "cari_id": None,
             "firma_id": firma_id,
-            "yil": int(tarih[:4]),
+            "yil": int(grup["tarih"][:4]),
         }
 
         hazir_fisler.append({
@@ -658,6 +662,12 @@ def banka_import_dogrula(satirlar, firma_id, aktif_yil):
             "hedef_kasa_adi": grup.get("hedef_kasa_adi", ""),
             "toplam_tutar": grup["toplam_tutar"],
         })
+
+    for farkli_yil in sorted(farkli_yillar):
+        uyarilar.append(
+            f"Seçili yıl ({aktif_yil}) dışında {farkli_yil} yılına ait satırlar bulundu. "
+            f"Bu satırlar {farkli_yil} yılı olarak kaydedilecek."
+        )
 
     return hazir_fisler, hatalar, uyarilar
 

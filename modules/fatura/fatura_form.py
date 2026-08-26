@@ -5,7 +5,7 @@ from datetime import datetime
 import uuid
 from core.db import veritabani_baglan
 from core.services import fis_kaydet, fis_guncelle
-from utils.formatters import format_currency, parse_currency, CurrencyFormatter
+from utils.formatters import format_currency, parse_currency, CurrencyFormatter, format_miktar
 from ui.widgets.lookup_widget import LookupWidget
 from ui.dialogs import ac_kart_dialog
 
@@ -129,7 +129,7 @@ class FaturaFormu(tk.Frame):
         self.entry_row_frame.grid_columnconfigure(5, weight=2, uniform="group1")
 
         # 1. Formatlayıcıları oluştur
-        self.ent_miktar_formatter = CurrencyFormatter(self.ent_miktar, on_change_callback=self.giris_satiri_hesapla)
+        self.ent_miktar_formatter = CurrencyFormatter(self.ent_miktar, on_change_callback=self.giris_satiri_hesapla, decimal_places=4, trim_sifir=True)
         self.ent_birim_fiyat_formatter = CurrencyFormatter(self.ent_birim_fiyat, on_change_callback=self.giris_satiri_hesapla)
         CurrencyFormatter(self.ent_kdv_oran, on_change_callback=self.giris_satiri_hesapla)
 
@@ -473,7 +473,7 @@ class FaturaFormu(tk.Frame):
         if self.duzenlenen_satir_id:
             self.satirlar[self.duzenlenen_satir_id] = satir_verisi
             self.tree.item(self.duzenlenen_satir_id, values=(
-                hesap_adi, aciklama, f"{miktar:,.2f}".replace(",", "X").replace(".", ",").replace("X", "."), birim,
+                hesap_adi, aciklama, format_miktar(miktar), birim,
                 format_currency(birim_fiyat), format_currency(kdv_tutar), format_currency(toplam_tutar), "❌"
             ))
             self.duzenlenen_satir_id = None
@@ -482,7 +482,7 @@ class FaturaFormu(tk.Frame):
             satir_id = str(uuid.uuid4())
             self.satirlar[satir_id] = satir_verisi
             self.tree.insert("", "end", iid=satir_id, values=(
-                hesap_adi, aciklama, f"{miktar:,.2f}".replace(",", "X").replace(".", ",").replace("X", "."), birim,
+                hesap_adi, aciklama, format_miktar(miktar), birim,
                 format_currency(birim_fiyat), format_currency(kdv_tutar), format_currency(toplam_tutar), "❌"
             ))
 
@@ -687,7 +687,7 @@ class FaturaFormu(tk.Frame):
                     'kdv_oran': satir_dict['kdv_oran'], 'kdv_tutar': satir_dict['kdv_tutar'], 'toplam_tutar': toplam_tutar, 'borc': borc, 'alacak': alacak,
                 }
                 self.tree.insert("", "end", iid=satir_id, values=(
-                    satir_dict['hesap_adi'], satir_dict.get('aciklama', ''), f"{satir_dict['miktar']:,.2f}".replace(",", "X").replace(".", ",").replace("X", "."), satir_dict['birim'],
+                    satir_dict['hesap_adi'], satir_dict.get('aciklama', ''), format_miktar(satir_dict['miktar']), satir_dict['birim'],
                     format_currency(satir_dict['birim_fiyat']), format_currency(satir_dict['kdv_tutar']), format_currency(toplam_tutar), "❌"
                 ))
             
