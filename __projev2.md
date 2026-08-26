@@ -86,7 +86,10 @@ utils/
 - **banka_kurumlari**: `id`, `kurum_adi`, `firma_id`, `durum`
 - **banka_hesaplari**: `id`, `hesap_adi`, `kurum_id`, `hesap_turu` (Vadesiz/POS/Kredi Kartı), `iban`, `komisyon_orani`, `firma_id`, `durum`
 - **kasalar**: `id`, `kasa_adi`, `firma_id`, `durum`
-- **hizmet_kartlari**: `id`, `kart_adi`, `tur` (Gider/Gelir), `kdv_oran`, `grup_id`, `firma_id`, `durum`
+- **hizmet_kartlari**: `id`, `kart_adi`, `tur` (Gider/Gelir/**KDV**), `kdv_oran`, `grup_id`, `firma_id`, `durum`
+  - `tur='KDV'` olan kartlar KDV hesaplarıdır: **191 İndirilecek KDV**, **391 Hesaplanan KDV**
+  - Bu kartlar "KDV" grubu altında (`hizmet_kartlari_gruplari.grup_adi='KDV'`) otomatik oluşturulur
+  - KDV kartları fiş satırlarında kullanılır ancak normal hizmet kartı lookuplarında gösterilmez (tür filtresi nedeniyle)
 - **hizmet_kartlari_gruplari**: `id`, `grup_adi`, `tur`, `firma_id`, `durum`
 - **genel_tanimlar**: `id`, `grup`, `deger`, `firma_id` (stok kategorisi, stok birimi gibi değerler için)
 

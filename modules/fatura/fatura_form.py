@@ -4,7 +4,7 @@ from tkcalendar import DateEntry
 from datetime import datetime
 import uuid
 from core.db import veritabani_baglan
-from core.services import fis_kaydet, fis_guncelle
+from core.services import fis_kaydet, fis_guncelle, kdv_satiri_olustur
 from utils.formatters import format_currency, parse_currency, CurrencyFormatter, format_miktar
 from ui.widgets.lookup_widget import LookupWidget
 from ui.dialogs import ac_kart_dialog
@@ -100,7 +100,8 @@ class FaturaFormu(tk.Frame):
         self.lbl_birim_fiyat_baslik = tk.Label(self.entry_row_frame, text="Birim Fiyat", anchor='w', font=("Arial", 9, "bold"), bg="#f5f7fb")
         self.lbl_birim_fiyat_baslik.grid(row=0, column=3, sticky='ew')
         tk.Label(self.entry_row_frame, text="KDV %", anchor='w', font=("Arial", 9, "bold"), bg="#f5f7fb").grid(row=0, column=4, sticky='ew')
-        tk.Label(self.entry_row_frame, text="Satır Toplamı", anchor='w', font=("Arial", 9, "bold"), bg="#f5f7fb").grid(row=0, column=5, sticky='ew')
+        tk.Label(self.entry_row_frame, text="Tutar (KDV Dahil)", anchor='w', font=("Arial", 9, "bold"), bg="#f5f7fb").grid(row=0, column=5, sticky='ew')
+        tk.Label(self.entry_row_frame, text="Satır Toplamı", anchor='w', font=("Arial", 9, "bold"), bg="#f5f7fb").grid(row=0, column=6, sticky='ew')
 
         # Giriş satırı widget'ları
         self.ent_stok = LookupWidget(self.entry_row_frame)
@@ -108,6 +109,7 @@ class FaturaFormu(tk.Frame):
         self.ent_miktar = tk.Entry(self.entry_row_frame, width=10, justify='right')
         self.ent_birim_fiyat = tk.Entry(self.entry_row_frame, width=15, justify='right')
         self.ent_kdv_oran = tk.Entry(self.entry_row_frame, width=8, justify='right')
+        self.ent_genel_tutar = tk.Entry(self.entry_row_frame, width=15, justify='right')
         self.lbl_satir_toplam = tk.Label(self.entry_row_frame, text="0,00", width=15, anchor='e', relief="sunken", bg="white", padx=2)
         self.btn_satir_ekle = tk.Button(self.entry_row_frame, text="+", command=self.satir_ekle, font=("Arial", 9, "bold"), width=3)
 
@@ -117,8 +119,9 @@ class FaturaFormu(tk.Frame):
         self.ent_miktar.grid(row=1, column=2, sticky='ew', padx=(0,2), pady=(2,0))
         self.ent_birim_fiyat.grid(row=1, column=3, sticky='ew', padx=(0,2), pady=(2,0))
         self.ent_kdv_oran.grid(row=1, column=4, sticky='ew', padx=(0,2), pady=(2,0))
-        self.lbl_satir_toplam.grid(row=1, column=5, sticky='ew', padx=(0,2), pady=(2,0))
-        self.btn_satir_ekle.grid(row=1, column=6, sticky='ew', pady=(2,0), padx=(2,0))
+        self.ent_genel_tutar.grid(row=1, column=5, sticky='ew', padx=(0,2), pady=(2,0))
+        self.lbl_satir_toplam.grid(row=1, column=6, sticky='ew', padx=(0,2), pady=(2,0))
+        self.btn_satir_ekle.grid(row=1, column=7, sticky='ew', pady=(2,0), padx=(2,0))
 
         # Sütun genişliklerini ayarla
         self.entry_row_frame.grid_columnconfigure(0, weight=4, uniform="group1")
@@ -127,18 +130,20 @@ class FaturaFormu(tk.Frame):
         self.entry_row_frame.grid_columnconfigure(3, weight=2, uniform="group1")
         self.entry_row_frame.grid_columnconfigure(4, weight=1, uniform="group1")
         self.entry_row_frame.grid_columnconfigure(5, weight=2, uniform="group1")
+        self.entry_row_frame.grid_columnconfigure(6, weight=2, uniform="group1")
 
         # 1. Formatlayıcıları oluştur
         self.ent_miktar_formatter = CurrencyFormatter(self.ent_miktar, on_change_callback=self.giris_satiri_hesapla, decimal_places=4, trim_sifir=True)
         self.ent_birim_fiyat_formatter = CurrencyFormatter(self.ent_birim_fiyat, on_change_callback=self.giris_satiri_hesapla)
         CurrencyFormatter(self.ent_kdv_oran, on_change_callback=self.giris_satiri_hesapla)
+        CurrencyFormatter(self.ent_genel_tutar, on_change_callback=self.genel_tutardan_hesapla)
 
         # 2. Varsayılan değerleri ekle
         self.ent_miktar.insert(0, "1,00")
         self.ent_kdv_oran.insert(0, "20")
 
         # 3. Odaklanma davranışını en son ekle
-        self._setup_select_on_focus([self.ent_stok.ent_display, self.ent_satir_aciklama, self.ent_miktar, self.ent_birim_fiyat, self.ent_kdv_oran])
+        self._setup_select_on_focus([self.ent_stok.ent_display, self.ent_satir_aciklama, self.ent_miktar, self.ent_birim_fiyat, self.ent_kdv_oran, self.ent_genel_tutar])
 
         # Başlık Alanları Enter Navigasyonu
         self.ent_tarih.bind("<Return>", lambda e: self.ent_fis_no.focus_set())
@@ -151,7 +156,8 @@ class FaturaFormu(tk.Frame):
         self.ent_satir_aciklama.bind("<Return>", lambda e: self.ent_miktar.focus_set())
         self.ent_miktar.bind("<Return>", lambda e: self.ent_birim_fiyat.focus_set())
         self.ent_birim_fiyat.bind("<Return>", lambda e: self.ent_kdv_oran.focus_set())
-        self.ent_kdv_oran.bind("<Return>", lambda e: self.satir_ekle())
+        self.ent_kdv_oran.bind("<Return>", lambda e: self.ent_genel_tutar.focus_set())
+        self.ent_genel_tutar.bind("<Return>", lambda e: self.satir_ekle())
 
         # Satır Listesi
         self.tree = ttk.Treeview(self.liste_frame, columns=("stok_adi", "aciklama", "miktar", "birim", "birim_fiyat", "kdv_tutar", "toplam_tutar", "sil"), show="headings")
@@ -173,7 +179,7 @@ class FaturaFormu(tk.Frame):
         self.tree.bind("<ButtonRelease-1>", self.on_tree_click)
 
         def _sync_widths(event=None):
-            column_map = {"stok_adi": 0, "aciklama": 1, "miktar": 2, "birim_fiyat": 3, "toplam_tutar": 5}
+            column_map = {"stok_adi": 0, "aciklama": 1, "miktar": 2, "birim_fiyat": 3, "toplam_tutar": 6}
             for col_name, i in column_map.items():
                 try:
                     width = self.entry_row_frame.grid_bbox(i, 1)[2]
@@ -373,6 +379,16 @@ class FaturaFormu(tk.Frame):
         cursor.execute("SELECT id, kart_adi, tur, kdv_oran FROM hizmet_kartlari WHERE durum=1 AND firma_id=?", (firma_id,))
         self.hizmet_dict = {f"[{row[2]}] {row[1]}": {'id': row[0], 'tur': row[2], 'kdv_oran': row[3]} for row in cursor.fetchall()}
 
+        # KDV hesap ID'lerini bul (tur='KDV' olanlar: 191 İndirilecek / 391 Hesaplanan)
+        self.indirilecek_kdv_id = None
+        self.hesaplanan_kdv_id = None
+        for key, val in self.hizmet_dict.items():
+            if val["tur"] == "KDV":
+                if "191" in key or "İndirilecek" in key:
+                    self.indirilecek_kdv_id = val["id"]
+                elif "391" in key or "Hesaplanan" in key:
+                    self.hesaplanan_kdv_id = val["id"]
+
         cursor.execute("SELECT id, kasa_adi FROM kasalar WHERE durum=1 AND firma_id=?", (firma_id,))
         self.kasa_dict = {row[1]: row[0] for row in cursor.fetchall()}
         cursor.execute("SELECT id, hesap_adi FROM banka_hesaplari WHERE durum=1 AND hesap_turu='Vadesiz' AND firma_id=?", (firma_id,))
@@ -419,12 +435,32 @@ class FaturaFormu(tk.Frame):
             miktar = parse_currency(self.ent_miktar.get())
             birim_fiyat = parse_currency(self.ent_birim_fiyat.get())
             kdv_oran = parse_currency(self.ent_kdv_oran.get())
+
+            # Akıllı giriş: "Tutar (KDV Dahil)" doluysa birim fiyatı ondan hesapla
+            genel = parse_currency(self.ent_genel_tutar.get())
+            if genel > 0 and miktar > 0:
+                birim_fiyat = genel / (miktar * (1 + kdv_oran / 100))
+
             ara_toplam = miktar * birim_fiyat
             kdv_tutar = ara_toplam * kdv_oran / 100
             toplam = ara_toplam + kdv_tutar
             self.lbl_satir_toplam.config(text=format_currency(toplam).replace(" TL", ""))
-        except (ValueError, TypeError):
+        except (ValueError, TypeError, ZeroDivisionError):
             self.lbl_satir_toplam.config(text="0,00")
+
+    def genel_tutardan_hesapla(self, event=None):
+        """'Tutar (KDV Dahil)' alanı değiştiğinde birim fiyatı geriye hesaplar."""
+        try:
+            genel = parse_currency(self.ent_genel_tutar.get())
+            miktar = parse_currency(self.ent_miktar.get())
+            kdv_oran = parse_currency(self.ent_kdv_oran.get())
+            if genel > 0 and miktar > 0:
+                birim_fiyat = genel / (miktar * (1 + kdv_oran / 100))
+                self.ent_birim_fiyat.delete(0, tk.END)
+                self.ent_birim_fiyat.insert(0, f"{birim_fiyat:,.4f}".replace(",", "X").replace(".", ",").replace("X", "."))
+            self.giris_satiri_hesapla()
+        except (ValueError, TypeError, ZeroDivisionError):
+            self.giris_satiri_hesapla()
 
     def satir_ekle(self):
         stok_adi = self.ent_stok.get_value()
@@ -437,7 +473,11 @@ class FaturaFormu(tk.Frame):
             birim_fiyat = parse_currency(self.ent_birim_fiyat.get())
             kdv_oran = int(parse_currency(self.ent_kdv_oran.get()))
             if miktar <= 0: raise ValueError("Miktar pozitif olmalı")
-        except (ValueError, TypeError):
+            # Akıllı giriş: "Tutar (KDV Dahil)" doluysa birim fiyatı ondan hesapla
+            genel_giris = parse_currency(self.ent_genel_tutar.get())
+            if genel_giris > 0 and miktar > 0:
+                birim_fiyat = genel_giris / (miktar * (1 + kdv_oran / 100))
+        except (ValueError, TypeError, ZeroDivisionError):
             messagebox.showwarning("Uyarı", "Lütfen geçerli miktar, birim fiyat ve KDV oranı girin.", parent=self)
             return
         
@@ -460,11 +500,17 @@ class FaturaFormu(tk.Frame):
         }
 
         # İade faturaları için borç/alacak mantığını tersine çevir
-        if "Satış Faturası" in self.fis_turu or "Alış İade Faturası" in self.fis_turu:
+        # "Satış" kök kelimesi: Satış Faturası, Satış İade Faturası, Hizmet Satış Faturası
+        is_satis = "Satış" in self.fis_turu
+        is_iade = "İade" in self.fis_turu
+        # Satır yönü: Satış → alacaklı; Alış → borçlu; Satış İade → borçlu; Alış İade → alacaklı
+        satir_borclu = (is_satis and is_iade) or (not is_satis and not is_iade)
+        # Satır tutarı NET'tir (KDV hariç); KDV ayrı bir satır olarak kaydedilir (191/391)
+        if not satir_borclu:
             satir_verisi['borc'] = 0
-            satir_verisi['alacak'] = toplam_tutar
+            satir_verisi['alacak'] = ara_toplam
         else:
-            satir_verisi['borc'] = toplam_tutar
+            satir_verisi['borc'] = ara_toplam
             satir_verisi['alacak'] = 0
 
         if not satir_verisi['aciklama']: 
@@ -504,6 +550,7 @@ class FaturaFormu(tk.Frame):
         self.ent_birim_fiyat_formatter.set_value(satir_verisi['birim_fiyat'])
         self.ent_kdv_oran.delete(0, tk.END)
         self.ent_kdv_oran.insert(0, str(satir_verisi['kdv_oran']))
+        self.ent_genel_tutar.delete(0, tk.END)
         self.giris_satiri_hesapla()
         self.btn_satir_ekle.config(text="✔")
         self.ent_stok.ent_display.focus_set()
@@ -530,6 +577,7 @@ class FaturaFormu(tk.Frame):
         self.ent_birim_fiyat.delete(0, tk.END)
         self.ent_kdv_oran.delete(0, tk.END)
         self.ent_kdv_oran.insert(0, "20")
+        self.ent_genel_tutar.delete(0, tk.END)
         self.giris_satiri_hesapla()
         self.ent_stok.ent_display.focus_set()
         self.duzenlenen_satir_id = None
@@ -570,13 +618,30 @@ class FaturaFormu(tk.Frame):
                 # Fatura satırlarını hazırla
         fis_satirlari = list(self.satirlar.values())
 
+        # KDV ayrı satırlarını ekle (191 İndirilecek KDV / 391 Hesaplanan KDV)
+        # Her satırın KDV'si, satır ile aynı yönde ayrı bir satır olarak kaydedilir
+        kdv_eklenecek_satirlar = []
+        for satir in self.satirlar.values():
+            kdv_tutar = satir.get('kdv_tutar', 0)
+            if kdv_tutar:
+                line_borclu = satir.get('borc', 0) > 0
+                kdv_hesap_id = self.indirilecek_kdv_id if line_borclu else self.hesaplanan_kdv_id
+                kdv_satiri = kdv_satiri_olustur(
+                    kdv_hesap_id, kdv_tutar,
+                    yon='borc' if line_borclu else 'alacak',
+                    aciklama=f"{'191 İndirilecek' if line_borclu else '391 Hesaplanan'} KDV - {satir.get('aciklama', '')}"
+                )
+                if kdv_satiri:
+                    kdv_eklenecek_satirlar.append(kdv_satiri)
+        fis_satirlari = fis_satirlari + kdv_eklenecek_satirlar
+
         # Vadeli faturada cari karşılık satırını ekle
         if odeme_tipi == "Vadeli" and cari_id:
             # Satış faturası: cari borçlanır (müşteri bize borçlanır)
             # Alış faturası: cari alacaklanır (biz tedarikçiye borçlanırız)
             # Satış İade: cari alacaklanır (müşteriye iade ederiz)
             # Alış İade: cari borçlanır (tedarikçi bize borçlanır)
-            is_satis = ("Satış Faturası" in self.fis_turu) or ("Hizmet Satış" in self.fis_turu)
+            is_satis = "Satış" in self.fis_turu
             is_iade = ("İade" in self.fis_turu)
 
             # Satış (iade değilse) → cari borçlu
@@ -605,7 +670,10 @@ class FaturaFormu(tk.Frame):
             odeme_hesap_turu_map = {"Nakit": "Kasa", "Banka": "Banka", "POS": "Banka"}
             odeme_hesap_turu = odeme_hesap_turu_map[odeme_tipi]
             
-            is_tahsilat = "Satış Faturası" in self.fis_turu or "Alış İade Faturası" in self.fis_turu
+            # Tahsilat: Satış (iade değil) veya Alış İade; Ödeme: Alış (iade değil) veya Satış İade
+            is_satis = "Satış" in self.fis_turu
+            is_iade = "İade" in self.fis_turu
+            is_tahsilat = (is_satis and not is_iade) or (not is_satis and is_iade)
             odeme_fis_turu = f"Fatura Peşin Tahsilat ({odeme_tipi})" if is_tahsilat else f"Fatura Peşin Ödeme ({odeme_tipi})"
 
             pesin_odeme_data = {
@@ -613,7 +681,7 @@ class FaturaFormu(tk.Frame):
                 'kaynak_modul': 'Fatura', 'aciklama': f"Fatura No: {fis_data.get('fis_no', '')} peşin ödemesi",
                 'firma_id': fis_data['firma_id'], 'yil': fis_data['yil']
             }
-            pesin_odeme_data['satirlar'] = list(self.satirlar.values())
+            pesin_odeme_data['satirlar'] = []
             pesin_odeme_data['satirlar'].append({
                 'hesap_turu': odeme_hesap_turu,
                 'hesap_id': odeme_hesap_id,
@@ -671,14 +739,24 @@ class FaturaFormu(tk.Frame):
                 JOIN {join_table} s ON fs.hesap_id = s.id 
                 WHERE fs.fis_id=? AND fs.hesap_turu=?
             """
-            cursor.execute(query, (self.fis_id, hesap_turu_filter))
+            params = [self.fis_id, hesap_turu_filter]
+
+            # KDV hesap satırlarını (191/391) normal satır listesine alma; kaydederken yeniden üretilir
+            kdv_ids = [kid for kid in (self.indirilecek_kdv_id, self.hesaplanan_kdv_id) if kid]
+            if kdv_ids:
+                placeholders = ", ".join("?" * len(kdv_ids))
+                query += f" AND fs.hesap_id NOT IN ({placeholders})"
+                params.extend(kdv_ids)
+
+            cursor.execute(query, params)
             satir_cols = [desc[0] for desc in cursor.description]
             for row in cursor.fetchall():
                 satir_dict = dict(zip(satir_cols, row))
                 satir_id = str(uuid.uuid4())
                 toplam_tutar = (satir_dict['miktar'] * satir_dict['birim_fiyat']) + satir_dict['kdv_tutar']
                 
-                is_line_credit = ("Satış Faturası" in self.fis_turu) or ("Alış İade Faturası" in self.fis_turu)
+                # satir_ekle ile aynı mantık: Satış → alacaklı; Alış → borçlu; Satış İade → borçlu; Alış İade → alacaklı
+                is_line_credit = not (("Satış" in self.fis_turu and "İade" in self.fis_turu) or ("Satış" not in self.fis_turu and "İade" not in self.fis_turu))
                 borc, alacak = (0, toplam_tutar) if is_line_credit else (toplam_tutar, 0)
 
                 self.satirlar[satir_id] = {

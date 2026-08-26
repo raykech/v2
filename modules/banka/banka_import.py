@@ -144,12 +144,12 @@ def banka_ornek_excel_olustur(dosya_yolu):
         # Banka Gider Fişi
         [
             "Banka Gider Fişi", "01.01.2026", "BG-001", "Vergi ödemesi", "Banka Hesabı 1",
-            "", "Vergi Gideri", "", "Mart vergisi", 1, 5000, 20, "",
+            "", "Vergi Gideri", "", "Mart vergisi", 1, 5000, "", "",
         ],
         # Banka Gelir Fişi
         [
             "Banka Gelir Fişi", "02.01.2026", "BGL-001", "Tahsilat", "Banka Hesabı 1",
-            "", "Satış Geliri", "", "", 1, 3000, 20, "",
+            "", "Satış Geliri", "", "", 1, 3000, "", "",
         ],
         # Bankalar Arası Virman
         [
@@ -214,11 +214,12 @@ def banka_ornek_excel_olustur(dosya_yolu):
         ("2. Her satır bir fiş satırıdır. Aynı Fiş No'ya sahip satırlar tek fiş olarak gruplanır.", False),
         ("3. Fiş No boş bırakılırsa her Excel satırı ayrı bir fiş olarak içe aktarılır.", False),
         ("4. Gider/Gelir fişlerinde Miktar + Birim Fiyat veya sadece Tutar kullanılabilir.", False),
-        ("5. Banka hesabı, kasa ve cari adları Tanımlar bölümündeki adlarla birebir aynı olmalıdır.", False),
-        ("6. Blokeyi Bankaya Aktar fişinde Ana Banka POS, Hedef Banka normal banka hesabı olmalıdır.", False),
-        ("7. Bankaya Yatan / Bankadan Çekilen fişlerinde karşı hesap Kasa'dır.", False),
-        ("8. Gelen/Giden Banka Transferi fişlerinde karşı hesap Cari'dir.", False),
-        ("9. Banka Açılış Fişinde Yön sütunu Borç veya Alacak olmalıdır.", False),
+        ("5. Banka işlemleri KDV'sizdir; KDV % sütunu dikkate alınmaz.", False),
+        ("6. Banka hesabı, kasa ve cari adları Tanımlar bölümündeki adlarla birebir aynı olmalıdır.", False),
+        ("7. Blokeyi Bankaya Aktar fişinde Ana Banka POS, Hedef Banka normal banka hesabı olmalıdır.", False),
+        ("8. Bankaya Yatan / Bankadan Çekilen fişlerinde karşı hesap Kasa'dır.", False),
+        ("9. Gelen/Giden Banka Transferi fişlerinde karşı hesap Cari'dir.", False),
+        ("10. Banka Açılış Fişinde Yön sütunu Borç veya Alacak olmalıdır.", False),
         ("", False),
         ("DESTEKLENEN FİŞ TÜRLERİ:", True),
         ("- Banka Gider Fişi", False),
@@ -571,9 +572,8 @@ def banka_import_dogrula(satirlar, firma_id, aktif_yil):
                 miktar = satir.get("Miktar")
                 birim_fiyat = satir.get("Birim Fiyat")
                 tutar = satir.get("Tutar")
-                kdv_oran = satir.get("KDV %")
-                if kdv_oran is None:
-                    kdv_oran = 0.0
+                # Banka gider/gelir fişleri KDV'sizdir; "KDV %" sütunu dikkate alınmaz.
+                kdv_oran = 0.0
 
                 if miktar is None:
                     miktar = 1.0
@@ -595,8 +595,8 @@ def banka_import_dogrula(satirlar, firma_id, aktif_yil):
                     uyarilar.append(f"Satır {row_no}: Girilen Tutar ile Miktar*Birim Fiyat farklı. Miktar*Birim Fiyat esas alındı.")
 
                 ara_toplam = miktar * birim_fiyat
-                kdv_tutar = ara_toplam * (kdv_oran / 100.0)
-                genel_toplam = ara_toplam + kdv_tutar
+                kdv_tutar = 0.0
+                genel_toplam = ara_toplam
 
                 line = {
                     "hesap_turu": "Hizmet",

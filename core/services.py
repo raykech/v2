@@ -67,8 +67,8 @@ def fis_guncelle(cursor, fis_id, fis_baslik, fis_satirlari, pesin_odeme_data=Non
     cursor.execute(
         """
         UPDATE fisler SET tarih=:tarih, fis_turu=:fis_turu, fis_no=:fis_no, aciklama=:aciklama,
-        cari_id=:cari_id, toplam_tutar=:toplam_tutar, kaynak_modul=:kaynak_modul
-        WHERE id=:id AND firma_id=:firma_id AND yil=:yil
+        cari_id=:cari_id, toplam_tutar=:toplam_tutar, kaynak_modul=:kaynak_modul, yil=:yil
+        WHERE id=:id AND firma_id=:firma_id
         """,
         fis_baslik
     )
@@ -219,6 +219,41 @@ def kaydet_kart(cursor, tablo_adi, veri_sozlugu):
         cursor.execute(f"INSERT INTO {tablo_adi} ({columns}) VALUES ({placeholders})", params)
         return cursor.lastrowid
 
+
+
+# ---------------------------------------------------------------- KDV yardımcılar
+def kdv_hesap_idleri(cursor, firma_id):
+    """
+    Firma için tanımlı KDV hesaplarının ID'lerini döndürür.
+    Dönüş: (indirilecek_kdv_id, hesaplanan_kdv_id)
+    Bulunamazsa ilgili değer None olur.
+    """
+    cursor.execute(
+        "SELECT kart_adi, id FROM hizmet_kartlari WHERE tur='KDV' AND durum=1 AND firma_id=?",
+        (firma_id,),
+    )
+    kdv_hesaplar = {kart_adi: kart_id for kart_adi, kart_id in cursor.fetchall()}
+    return kdv_hesaplar.get("191 İndirilecek KDV"), kdv_hesaplar.get("391 Hesaplanan KDV")
+
+
+def kdv_satiri_olustur(kdv_hesap_id, kdv_tutar, yon, aciklama=""):
+    """
+    KDV için ayrı bir fiş satırı üretir.
+    yon: 'borc' (İndirilecek KDV) veya 'alacak' (Hesaplanan KDV)
+    """
+    if not kdv_hesap_id or not kdv_tutar:
+        return None
+    return {
+        "hesap_turu": "Hizmet",
+        "hesap_id": kdv_hesap_id,
+        "borc": kdv_tutar if yon == "borc" else 0,
+        "alacak": 0 if yon == "borc" else kdv_tutar,
+        "aciklama": aciklama or "KDV",
+        "miktar": 1,
+        "birim_fiyat": kdv_tutar,
+        "kdv_oran": 0,
+        "kdv_tutar": 0,
+    }
 
 
 # ---------------------------------------------------------------- Çek/Senet özel yardımcılar

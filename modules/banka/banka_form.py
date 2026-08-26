@@ -111,19 +111,16 @@ class BankaFisiFormu(tk.Frame):
         self.ent_satir_aciklama = tk.Entry(self.entry_row_frame)
         self.ent_miktar = tk.Entry(self.entry_row_frame, width=10, justify='right')
         self.ent_birim_fiyat = tk.Entry(self.entry_row_frame, width=15, justify='right')
-        self.ent_kdv_oran = tk.Entry(self.entry_row_frame, width=8, justify='right')
         self.lbl_satir_toplam = tk.Label(self.entry_row_frame, text="0,00", width=15, anchor='e', relief="sunken", bg="white", padx=2)
         self.btn_satir_ekle = tk.Button(self.entry_row_frame, text="+", command=self.satir_ekle, font=("Arial", 9, "bold"), width=3)
 
-        # 1. CurrencyFormatter'ları oluştur
+        # 1. CurrencyFormatter'ları oluştur (Banka gider/gelir KDV'sizdir)
         CurrencyFormatter(self.ent_miktar, on_change_callback=self.hesapla_satir_toplami, decimal_places=4, trim_sifir=True)
         CurrencyFormatter(self.ent_birim_fiyat, on_change_callback=self.hesapla_satir_toplami)
-        CurrencyFormatter(self.ent_kdv_oran, on_change_callback=self.hesapla_satir_toplami)
         CurrencyFormatter(self.ent_virman_tutar)
 
         # 2. Varsayılan değerleri ekle
         self.ent_miktar.insert(0, "1,00")
-        self.ent_kdv_oran.insert(0, "20")
 
         # 3. Odaklanma davranışını ekle
         self._setup_select_on_focus([
@@ -131,51 +128,45 @@ class BankaFisiFormu(tk.Frame):
             self.lookup_hesap.ent_display,
             self.ent_satir_aciklama,
             self.ent_miktar,
-            self.ent_birim_fiyat,
-            self.ent_kdv_oran
+            self.ent_birim_fiyat
         ])
 
         # Enter ile ilerleme
         self.lookup_hesap.ent_display.bind("<Return>", lambda e: self.ent_satir_aciklama.focus_set())
         self.ent_satir_aciklama.bind("<Return>", lambda e: self.ent_miktar.focus_set())
         self.ent_miktar.bind("<Return>", lambda e: self.ent_birim_fiyat.focus_set())
-        self.ent_birim_fiyat.bind("<Return>", lambda e: self.ent_kdv_oran.focus_set())
-        self.ent_kdv_oran.bind("<Return>", lambda e: self.satir_ekle())
+        self.ent_birim_fiyat.bind("<Return>", lambda e: self.satir_ekle())
 
         # --- Başlıklar ve Giriş Satırı ---
         tk.Label(self.entry_row_frame, text="Hesap Adı", anchor='w', font=("Arial", 9, "bold")).grid(row=0, column=0, sticky='ew')
         tk.Label(self.entry_row_frame, text="Satır Açıklaması", anchor='w', font=("Arial", 9, "bold")).grid(row=0, column=1, sticky='ew')
         tk.Label(self.entry_row_frame, text="Miktar", anchor='w', font=("Arial", 9, "bold")).grid(row=0, column=2, sticky='ew')
         tk.Label(self.entry_row_frame, text="Birim Fiyat", anchor='w', font=("Arial", 9, "bold")).grid(row=0, column=3, sticky='ew')
-        tk.Label(self.entry_row_frame, text="KDV %", anchor='w', font=("Arial", 9, "bold")).grid(row=0, column=4, sticky='ew')
-        tk.Label(self.entry_row_frame, text="Genel Toplam", anchor='w', font=("Arial", 9, "bold")).grid(row=0, column=5, sticky='ew')
+        tk.Label(self.entry_row_frame, text="Genel Toplam", anchor='w', font=("Arial", 9, "bold")).grid(row=0, column=4, sticky='ew')
 
         self.lookup_hesap.grid(row=1, column=0, sticky='ew', padx=(0, 2), pady=(2, 0))
         self.ent_satir_aciklama.grid(row=1, column=1, sticky='ew', padx=(0, 2), pady=(2, 0))
         self.ent_miktar.grid(row=1, column=2, sticky='ew', padx=(0, 2), pady=(2, 0))
         self.ent_birim_fiyat.grid(row=1, column=3, sticky='ew', padx=(0, 2), pady=(2, 0))
-        self.ent_kdv_oran.grid(row=1, column=4, sticky='ew', padx=(0, 2), pady=(2, 0))
-        self.lbl_satir_toplam.grid(row=1, column=5, sticky='ew', padx=(0, 2), pady=(2, 0))
-        self.btn_satir_ekle.grid(row=1, column=6, sticky='ew', pady=(2, 0))
+        self.lbl_satir_toplam.grid(row=1, column=4, sticky='ew', padx=(0, 2), pady=(2, 0))
+        self.btn_satir_ekle.grid(row=1, column=5, sticky='ew', pady=(2, 0))
 
         self.entry_row_frame.grid_columnconfigure(0, weight=4, uniform="group1")
         self.entry_row_frame.grid_columnconfigure(1, weight=5, uniform="group1")
         self.entry_row_frame.grid_columnconfigure(2, weight=1, uniform="group1")
         self.entry_row_frame.grid_columnconfigure(3, weight=2, uniform="group1")
-        self.entry_row_frame.grid_columnconfigure(4, weight=1, uniform="group1")
-        self.entry_row_frame.grid_columnconfigure(5, weight=2, uniform="group1")
+        self.entry_row_frame.grid_columnconfigure(4, weight=2, uniform="group1")
 
         # --- Satır Listesi ---
         self.tree_satirlar = ttk.Treeview(
             self.liste_frame,
-            columns=("hesap_adi", "aciklama", "miktar", "birim_fiyat", "kdv_tutar", "toplam_tutar", "sil"),
+            columns=("hesap_adi", "aciklama", "miktar", "birim_fiyat", "toplam_tutar", "sil"),
             show="headings"
         )
         self.tree_satirlar.heading("hesap_adi", text="Hesap Adı")
         self.tree_satirlar.heading("aciklama", text="Satır Açıklaması")
         self.tree_satirlar.heading("miktar", text="Miktar")
         self.tree_satirlar.heading("birim_fiyat", text="Birim Fiyat")
-        self.tree_satirlar.heading("kdv_tutar", text="KDV T.", anchor="e")
         self.tree_satirlar.heading("toplam_tutar", text="Genel Toplam")
         self.tree_satirlar.heading("sil", text="", anchor="center")
 
@@ -190,7 +181,7 @@ class BankaFisiFormu(tk.Frame):
         def _sync_widths(event=None):
             column_map = {
                 "hesap_adi": 0, "aciklama": 1, "miktar": 2,
-                "birim_fiyat": 3, "kdv_tutar": 4, "toplam_tutar": 5
+                "birim_fiyat": 3, "toplam_tutar": 4
             }
             for col_name, i in column_map.items():
                 try:
@@ -213,13 +204,9 @@ class BankaFisiFormu(tk.Frame):
         self.lbl_ara_toplam = tk.Label(toplamlar_frame, text="0,00", font=("Arial", 9), bg="#e9ecef", width=15, anchor="e")
         self.lbl_ara_toplam.grid(row=0, column=3, sticky="e")
 
-        tk.Label(toplamlar_frame, text="Toplam KDV:", font=("Arial", 9, "bold"), bg="#e9ecef").grid(row=1, column=2, sticky="e", padx=5)
-        self.lbl_toplam_kdv = tk.Label(toplamlar_frame, text="0,00", font=("Arial", 9), bg="#e9ecef", width=15, anchor="e")
-        self.lbl_toplam_kdv.grid(row=1, column=3, sticky="e")
-
-        tk.Label(toplamlar_frame, text="Genel Toplam:", font=("Arial", 10, "bold"), bg="#e9ecef").grid(row=2, column=2, sticky="e", padx=5)
+        tk.Label(toplamlar_frame, text="Genel Toplam:", font=("Arial", 10, "bold"), bg="#e9ecef").grid(row=1, column=2, sticky="e", padx=5)
         self.lbl_genel_toplam = tk.Label(toplamlar_frame, text="0,00", font=("Arial", 10, "bold"), bg="#e9ecef", width=15, anchor="e")
-        self.lbl_genel_toplam.grid(row=2, column=3, sticky="e")
+        self.lbl_genel_toplam.grid(row=1, column=3, sticky="e")
 
         # --- Alt Butonlar ---
         self.btn_kaydet = tk.Button(
@@ -300,45 +287,8 @@ class BankaFisiFormu(tk.Frame):
             widget.bind("<Button-1>", _on_click, add='+')
 
     def _on_hesap_select(self, event=None):
-        """Seçilen hizmet kartına göre KDV oranını otomatik doldurur."""
-        try:
-            hesap_id = self.lookup_hesap.get()
-            hesap_adi = self.lookup_hesap.get_value()
-
-            if not hesap_id and not hesap_adi:
-                return
-
-            kdv_oran = 20  # Varsayılan
-            hesap_bilgisi = None
-
-            if hesap_id:
-                for key, value in self.hizmet_dict.items():
-                    if value.get('id') == hesap_id:
-                        hesap_bilgisi = value
-                        break
-
-            if not hesap_bilgisi and hesap_adi:
-                temiz_adi = hesap_adi
-                if '] ' in hesap_adi:
-                    temiz_adi = hesap_adi.split('] ', 1)[1]
-
-                for key, value in self.hizmet_dict.items():
-                    key_adi = key.split('] ', 1)[1] if '] ' in key else key
-                    if key_adi == temiz_adi or key == hesap_adi:
-                        hesap_bilgisi = value
-                        break
-
-            if hesap_bilgisi:
-                kdv_oran_db = hesap_bilgisi.get('kdv_oran')
-                if kdv_oran_db is not None:
-                    kdv_oran = kdv_oran_db
-
-            self.ent_kdv_oran.delete(0, tk.END)
-            self.ent_kdv_oran.insert(0, f"{kdv_oran:g}")
-            self.hesapla_satir_toplami()
-
-        except Exception as e:
-            print(f"_on_hesap_select hatası: {e}")
+        """Banka fişlerinde KDV yoktur; sadece odak yönetimi için korunur."""
+        pass
 
     def verileri_yukle(self):
         """Lookup widget'ları için gerekli verileri veritabanından yükler."""
@@ -462,15 +412,12 @@ class BankaFisiFormu(tk.Frame):
         self._setup_hesap_lookup()
 
     def hesapla_satir_toplami(self, *args):
-        """Satır toplamını hesaplar."""
+        """Satır toplamını hesaplar (banka fişleri KDV'sizdir)."""
         try:
             miktar = parse_currency(self.ent_miktar.get())
             birim_fiyat = parse_currency(self.ent_birim_fiyat.get())
-            kdv_oran = parse_currency(self.ent_kdv_oran.get())
 
-            ara_toplam = miktar * birim_fiyat
-            kdv_tutar = ara_toplam * (kdv_oran / 100)
-            genel_toplam = ara_toplam + kdv_tutar
+            genel_toplam = miktar * birim_fiyat
 
             self.lbl_satir_toplam.config(
                 text=f"{genel_toplam:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
@@ -485,7 +432,6 @@ class BankaFisiFormu(tk.Frame):
         aciklama = self.ent_satir_aciklama.get()
         miktar = parse_currency(self.ent_miktar.get())
         birim_fiyat = parse_currency(self.ent_birim_fiyat.get())
-        kdv_oran = parse_currency(self.ent_kdv_oran.get())
 
         if not hesap_id:
             messagebox.showwarning("Eksik Bilgi", "Lütfen bir hesap seçin.", parent=self)
@@ -496,8 +442,7 @@ class BankaFisiFormu(tk.Frame):
             return
 
         ara_toplam = miktar * birim_fiyat
-        kdv_tutar = ara_toplam * (kdv_oran / 100)
-        genel_toplam = ara_toplam + kdv_tutar
+        genel_toplam = ara_toplam
 
         yeni_satir_verisi = {
             "hesap_id": hesap_id,
@@ -505,9 +450,9 @@ class BankaFisiFormu(tk.Frame):
             "aciklama": aciklama,
             "miktar": miktar,
             "birim_fiyat": birim_fiyat,
-            "kdv_oran": kdv_oran,
+            "kdv_oran": 0,
             "ara_toplam": ara_toplam,
-            "kdv_tutar": kdv_tutar,
+            "kdv_tutar": 0,
             "genel_toplam": genel_toplam
         }
 
@@ -519,7 +464,7 @@ class BankaFisiFormu(tk.Frame):
                     values=(
                         hesap_adi, aciklama,
                         format_miktar(miktar), f"{birim_fiyat:,.2f}",
-                        f"{kdv_tutar:,.2f}", f"{genel_toplam:,.2f}", "❌"
+                        f"{genel_toplam:,.2f}", "❌"
                     )
                 )
             except Exception as e:
@@ -527,7 +472,7 @@ class BankaFisiFormu(tk.Frame):
                 item_id = self.tree_satirlar.insert("", "end", values=(
                     hesap_adi, aciklama,
                     format_miktar(miktar), f"{birim_fiyat:,.2f}",
-                    f"{kdv_tutar:,.2f}", f"{genel_toplam:,.2f}", "❌"
+                    f"{genel_toplam:,.2f}", "❌"
                 ))
                 self.satirlar[item_id] = yeni_satir_verisi
             self.duzenlenen_satir_id = None
@@ -539,7 +484,7 @@ class BankaFisiFormu(tk.Frame):
                 values=(
                     hesap_adi, aciklama,
                     format_miktar(miktar), f"{birim_fiyat:,.2f}",
-                    f"{kdv_tutar:,.2f}", f"{genel_toplam:,.2f}", "❌"
+                    f"{genel_toplam:,.2f}", "❌"
                 )
             )
             self.satirlar[item_id] = yeni_satir_verisi
@@ -553,8 +498,6 @@ class BankaFisiFormu(tk.Frame):
         self.ent_miktar.delete(0, tk.END)
         self.ent_miktar.insert(0, "1,00")
         self.ent_birim_fiyat.delete(0, tk.END)
-        self.ent_kdv_oran.delete(0, tk.END)
-        self.ent_kdv_oran.insert(0, "20")
         self.lookup_hesap.ent_display.focus_set()
         self.duzenlenen_satir_id = None
         self.guncelle_toplamlari()
@@ -578,7 +521,7 @@ class BankaFisiFormu(tk.Frame):
     def on_tree_click(self, event):
         """Treeview'de tıklama olayını işler."""
         region = self.tree_satirlar.identify("region", event.x, event.y)
-        if region == "cell" and self.tree_satirlar.identify_column(event.x) == "#7":
+        if region == "cell" and self.tree_satirlar.identify_column(event.x) == "#6":
             self.satir_sil(self.tree_satirlar.identify_row(event.y))
 
     def satir_duzenle_icin_yukle(self, event=None):
@@ -599,8 +542,6 @@ class BankaFisiFormu(tk.Frame):
             self.ent_miktar.insert(0, format_miktar(satir_verisi['miktar']))
             self.ent_birim_fiyat.delete(0, tk.END)
             self.ent_birim_fiyat.insert(0, f"{satir_verisi['birim_fiyat']:.2f}".replace('.', ','))
-            self.ent_kdv_oran.delete(0, tk.END)
-            self.ent_kdv_oran.insert(0, f"{satir_verisi['kdv_oran']:.2f}".replace('.', ','))
             self.hesapla_satir_toplami()
             self.lookup_hesap.ent_display.focus_set()
 
@@ -611,11 +552,9 @@ class BankaFisiFormu(tk.Frame):
     def guncelle_toplamlari(self):
         """Fişin altındaki genel toplamları günceller."""
         ara_toplam = sum(s['ara_toplam'] for s in self.satirlar.values())
-        toplam_kdv = sum(s['kdv_tutar'] for s in self.satirlar.values())
         genel_toplam = sum(s['genel_toplam'] for s in self.satirlar.values())
 
         self.lbl_ara_toplam.config(text=f"{ara_toplam:,.2f}".replace(",", "X").replace(".", ",").replace("X", "."))
-        self.lbl_toplam_kdv.config(text=f"{toplam_kdv:,.2f}".replace(",", "X").replace(".", ",").replace("X", "."))
         self.lbl_genel_toplam.config(text=f"{genel_toplam:,.2f}".replace(",", "X").replace(".", ",").replace("X", "."))
 
     def fis_kaydet(self):
@@ -875,7 +814,7 @@ class BankaFisiFormu(tk.Frame):
                             values=(
                                 hesap_adi, satir_data['aciklama'],
                                 format_miktar(miktar), f"{birim_fiyat:,.2f}",
-                                f"{kdv_tutar:,.2f}", f"{genel_toplam:,.2f}", "❌"
+                                f"{genel_toplam:,.2f}", "❌"
                             )
                         )
                         self.satirlar[item_id] = yeni_satir_verisi

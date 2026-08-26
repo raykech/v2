@@ -97,6 +97,7 @@ class KasaFisiFormu(tk.Frame):
         self.ent_miktar = tk.Entry(self.entry_row_frame, width=10, justify='right')
         self.ent_birim_fiyat = tk.Entry(self.entry_row_frame, width=15, justify='right')
         self.ent_kdv_oran = tk.Entry(self.entry_row_frame, width=8, justify='right')
+        self.ent_genel_tutar = tk.Entry(self.entry_row_frame, width=15, justify='right')
         self.lbl_satir_toplam = tk.Label(self.entry_row_frame, text="0,00", width=15, anchor='e', relief="sunken", bg="white", padx=2)
         self.btn_satir_ekle = tk.Button(self.entry_row_frame, text="+", command=self.satir_ekle, font=("Arial", 9, "bold"), width=3)
 
@@ -104,6 +105,7 @@ class KasaFisiFormu(tk.Frame):
         CurrencyFormatter(self.ent_miktar, on_change_callback=self.hesapla_satir_toplami, decimal_places=4, trim_sifir=True)
         CurrencyFormatter(self.ent_birim_fiyat, on_change_callback=self.hesapla_satir_toplami)
         CurrencyFormatter(self.ent_kdv_oran, on_change_callback=self.hesapla_satir_toplami)
+        CurrencyFormatter(self.ent_genel_tutar, on_change_callback=self.genel_tutardan_hesapla)
         CurrencyFormatter(self.ent_virman_tutar)
 
         # 2. Varsayılan değerleri ekle
@@ -117,7 +119,8 @@ class KasaFisiFormu(tk.Frame):
             self.ent_satir_aciklama,
             self.ent_miktar,
             self.ent_birim_fiyat,
-            self.ent_kdv_oran
+            self.ent_kdv_oran,
+            self.ent_genel_tutar
         ])
 
         # Enter ile ilerleme
@@ -125,7 +128,8 @@ class KasaFisiFormu(tk.Frame):
         self.ent_satir_aciklama.bind("<Return>", lambda e: self.ent_miktar.focus_set())
         self.ent_miktar.bind("<Return>", lambda e: self.ent_birim_fiyat.focus_set())
         self.ent_birim_fiyat.bind("<Return>", lambda e: self.ent_kdv_oran.focus_set())
-        self.ent_kdv_oran.bind("<Return>", lambda e: self.satir_ekle())
+        self.ent_kdv_oran.bind("<Return>", lambda e: self.ent_genel_tutar.focus_set())
+        self.ent_genel_tutar.bind("<Return>", lambda e: self.satir_ekle())
 
         # --- Başlıklar ve Giriş Satırı ---
         tk.Label(self.entry_row_frame, text="Hesap Adı", anchor='w', font=("Arial", 9, "bold")).grid(row=0, column=0, sticky='ew')
@@ -133,15 +137,17 @@ class KasaFisiFormu(tk.Frame):
         tk.Label(self.entry_row_frame, text="Miktar", anchor='w', font=("Arial", 9, "bold")).grid(row=0, column=2, sticky='ew')
         tk.Label(self.entry_row_frame, text="Birim Fiyat", anchor='w', font=("Arial", 9, "bold")).grid(row=0, column=3, sticky='ew')
         tk.Label(self.entry_row_frame, text="KDV %", anchor='w', font=("Arial", 9, "bold")).grid(row=0, column=4, sticky='ew')
-        tk.Label(self.entry_row_frame, text="Genel Toplam", anchor='w', font=("Arial", 9, "bold")).grid(row=0, column=5, sticky='ew')
+        tk.Label(self.entry_row_frame, text="Tutar (KDV Dahil)", anchor='w', font=("Arial", 9, "bold")).grid(row=0, column=5, sticky='ew')
+        tk.Label(self.entry_row_frame, text="Genel Toplam", anchor='w', font=("Arial", 9, "bold")).grid(row=0, column=6, sticky='ew')
 
         self.lookup_hesap.grid(row=1, column=0, sticky='ew', padx=(0, 2), pady=(2, 0))
         self.ent_satir_aciklama.grid(row=1, column=1, sticky='ew', padx=(0, 2), pady=(2, 0))
         self.ent_miktar.grid(row=1, column=2, sticky='ew', padx=(0, 2), pady=(2, 0))
         self.ent_birim_fiyat.grid(row=1, column=3, sticky='ew', padx=(0, 2), pady=(2, 0))
         self.ent_kdv_oran.grid(row=1, column=4, sticky='ew', padx=(0, 2), pady=(2, 0))
-        self.lbl_satir_toplam.grid(row=1, column=5, sticky='ew', padx=(0, 2), pady=(2, 0))
-        self.btn_satir_ekle.grid(row=1, column=6, sticky='ew', pady=(2, 0))
+        self.ent_genel_tutar.grid(row=1, column=5, sticky='ew', padx=(0, 2), pady=(2, 0))
+        self.lbl_satir_toplam.grid(row=1, column=6, sticky='ew', padx=(0, 2), pady=(2, 0))
+        self.btn_satir_ekle.grid(row=1, column=7, sticky='ew', pady=(2, 0))
 
         self.entry_row_frame.grid_columnconfigure(0, weight=4, uniform="group1")
         self.entry_row_frame.grid_columnconfigure(1, weight=5, uniform="group1")
@@ -149,6 +155,7 @@ class KasaFisiFormu(tk.Frame):
         self.entry_row_frame.grid_columnconfigure(3, weight=2, uniform="group1")
         self.entry_row_frame.grid_columnconfigure(4, weight=1, uniform="group1")
         self.entry_row_frame.grid_columnconfigure(5, weight=2, uniform="group1")
+        self.entry_row_frame.grid_columnconfigure(6, weight=2, uniform="group1")
 
         # --- Satır Listesi ---
         self.tree_satirlar = ttk.Treeview(
@@ -175,7 +182,7 @@ class KasaFisiFormu(tk.Frame):
         def _sync_widths(event=None):
             column_map = {
                 "hesap_adi": 0, "aciklama": 1, "miktar": 2,
-                "birim_fiyat": 3, "kdv_tutar": 4, "toplam_tutar": 5
+                "birim_fiyat": 3, "kdv_tutar": 4, "toplam_tutar": 6
             }
             for col_name, i in column_map.items():
                 try:
@@ -352,6 +359,16 @@ class KasaFisiFormu(tk.Frame):
             for row in cursor.fetchall()
         }
 
+        # KDV hesap ID'lerini bul (tur='KDV' olanlar)
+        self.indirilecek_kdv_id = None
+        self.hesaplanan_kdv_id = None
+        for key, val in self.hizmet_dict.items():
+            if val["tur"] == "KDV":
+                if "191" in key or "İndirilecek" in key:
+                    self.indirilecek_kdv_id = val["id"]
+                elif "391" in key or "Hesaplanan" in key:
+                    self.hesaplanan_kdv_id = val["id"]
+
         cursor.execute("SELECT id, kasa_adi FROM kasalar WHERE durum=1 AND firma_id=?", (firma_id,))
         self.kasa_dict = {row[1]: row[0] for row in cursor.fetchall()}
         self.lookup_ana_kasa.configure_lookup(
@@ -420,6 +437,11 @@ class KasaFisiFormu(tk.Frame):
             birim_fiyat = parse_currency(self.ent_birim_fiyat.get())
             kdv_oran = parse_currency(self.ent_kdv_oran.get())
 
+            # Akıllı giriş: "Tutar (KDV Dahil)" doluysa birim fiyatı otomatik hesapla
+            genel = parse_currency(self.ent_genel_tutar.get())
+            if genel > 0 and miktar > 0:
+                birim_fiyat = genel / (miktar * (1 + kdv_oran / 100))
+
             ara_toplam = miktar * birim_fiyat
             kdv_tutar = ara_toplam * (kdv_oran / 100)
             genel_toplam = ara_toplam + kdv_tutar
@@ -427,8 +449,22 @@ class KasaFisiFormu(tk.Frame):
             self.lbl_satir_toplam.config(
                 text=f"{genel_toplam:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
             )
-        except (ValueError, tk.TclError):
+        except (ValueError, tk.TclError, ZeroDivisionError):
             self.lbl_satir_toplam.config(text="0,00")
+
+    def genel_tutardan_hesapla(self, *args):
+        """'Tutar (KDV Dahil)' alanı değiştiğinde birim fiyatı geriye hesaplar."""
+        try:
+            genel = parse_currency(self.ent_genel_tutar.get())
+            miktar = parse_currency(self.ent_miktar.get())
+            kdv_oran = parse_currency(self.ent_kdv_oran.get())
+            if genel > 0 and miktar > 0:
+                birim_fiyat = genel / (miktar * (1 + kdv_oran / 100))
+                self.ent_birim_fiyat.delete(0, tk.END)
+                self.ent_birim_fiyat.insert(0, f"{birim_fiyat:,.4f}".replace(",", "X").replace(".", ",").replace("X", "."))
+            self.hesapla_satir_toplami()
+        except (ValueError, tk.TclError, ZeroDivisionError):
+            self.hesapla_satir_toplami()
 
     def satir_ekle(self):
         """Yeni satır ekler veya mevcut satırı günceller."""
@@ -438,6 +474,11 @@ class KasaFisiFormu(tk.Frame):
         miktar = parse_currency(self.ent_miktar.get())
         birim_fiyat = parse_currency(self.ent_birim_fiyat.get())
         kdv_oran = parse_currency(self.ent_kdv_oran.get())
+
+        # Akıllı giriş: "Tutar (KDV Dahil)" doluysa birim fiyatı ondan hesapla
+        genel_giris = parse_currency(self.ent_genel_tutar.get())
+        if genel_giris > 0 and miktar > 0:
+            birim_fiyat = genel_giris / (miktar * (1 + kdv_oran / 100))
 
         if not hesap_id:
             messagebox.showwarning("Eksik Bilgi", "Lütfen bir hesap seçin.", parent=self)
@@ -507,6 +548,7 @@ class KasaFisiFormu(tk.Frame):
         self.ent_birim_fiyat.delete(0, tk.END)
         self.ent_kdv_oran.delete(0, tk.END)
         self.ent_kdv_oran.insert(0, "20")
+        self.ent_genel_tutar.delete(0, tk.END)
         self.lookup_hesap.ent_display.focus_set()
         self.duzenlenen_satir_id = None
         self.guncelle_toplamlari()
@@ -553,6 +595,7 @@ class KasaFisiFormu(tk.Frame):
             self.ent_birim_fiyat.insert(0, f"{satir_verisi['birim_fiyat']:.2f}".replace('.', ','))
             self.ent_kdv_oran.delete(0, tk.END)
             self.ent_kdv_oran.insert(0, f"{satir_verisi['kdv_oran']:.2f}".replace('.', ','))
+            self.ent_genel_tutar.delete(0, tk.END)
             self.hesapla_satir_toplami()
             self.lookup_hesap.ent_display.focus_set()
 
@@ -644,6 +687,21 @@ class KasaFisiFormu(tk.Frame):
                     "kdv_oran": satir['kdv_oran'],
                     "kdv_tutar": satir['kdv_tutar']
                 })
+                # KDV ayrı satır olarak eklenir (191 İndirilecek KDV / 391 Hesaplanan KDV)
+                if satir.get('kdv_tutar'):
+                    kdv_hesap_id = self.indirilecek_kdv_id if is_gider else self.hesaplanan_kdv_id
+                    if kdv_hesap_id:
+                        fis_satirlari.append({
+                            "hesap_turu": "Hizmet",
+                            "hesap_id": kdv_hesap_id,
+                            "borc": satir['kdv_tutar'] if is_gider else 0,
+                            "alacak": 0 if is_gider else satir['kdv_tutar'],
+                            "aciklama": f"{'İndirilecek' if is_gider else 'Hesaplanan'} KDV",
+                            "miktar": 1,
+                            "birim_fiyat": satir['kdv_tutar'],
+                            "kdv_oran": 0,
+                            "kdv_tutar": 0
+                        })
 
             fis_satirlari.append({
                 "hesap_turu": "Kasa",
@@ -719,6 +777,9 @@ class KasaFisiFormu(tk.Frame):
                 is_gider = baslik_data['fis_turu'] == "Kasa Gider Fişi"
                 for satir in satirlar:
                     satir_data = dict(zip(satir_cols, satir))
+                    # KDV hesap satırları otomatik yeniden üretilir, normal listeye eklenmez
+                    if satir_data['hesap_id'] in (self.indirilecek_kdv_id, self.hesaplanan_kdv_id):
+                        continue
                     if satir_data['hesap_turu'] == 'Kasa':
                         self.lookup_ana_kasa.set(satir_data['hesap_id'])
                     else:

@@ -23,7 +23,7 @@ except ImportError:
     Alignment = Font = PatternFill = DataValidation = get_column_letter = None
 
 from core.db import veritabani_baglan
-from core.services import fis_kaydet
+from core.services import fis_kaydet, kdv_hesap_idleri, kdv_satiri_olustur
 
 
 KASA_FIS_TURLERI = [
@@ -320,6 +320,9 @@ def kasa_import_dogrula(satirlar, firma_id, aktif_yil):
     try:
         cursor = conn.cursor()
 
+        # KDV hesap ID'leri (191 İndirilecek / 391 Hesaplanan)
+        indirilecek_kdv_id, hesaplanan_kdv_id = kdv_hesap_idleri(cursor, firma_id)
+
         # Kasa ve hizmet kartlarını bir kez yükle
         kasa_map = {}
         cursor.execute("SELECT id, kasa_adi FROM kasalar WHERE durum=1 AND firma_id=?", (firma_id,))
@@ -538,6 +541,23 @@ def kasa_import_dogrula(satirlar, firma_id, aktif_yil):
         if fis_turu in ("Kasa Gider Fişi", "Kasa Gelir Fişi"):
             is_gider = fis_turu == "Kasa Gider Fişi"
             toplam = grup["toplam_tutar"]
+
+            # KDV ayrı satırlarını ekle (satır ile aynı yönde; 191/391)
+            kdv_eklenecek_satirlar = []
+            for satir in fis_satirlari:
+                kdv_tutar = satir.get("kdv_tutar", 0) or 0
+                if kdv_tutar:
+                    line_borclu = satir.get("borc", 0) > 0
+                    kdv_hesap_id = indirilecek_kdv_id if line_borclu else hesaplanan_kdv_id
+                    kdv_satiri = kdv_satiri_olustur(
+                        kdv_hesap_id, kdv_tutar,
+                        yon="borc" if line_borclu else "alacak",
+                        aciklama=f"{'191 İndirilecek' if line_borclu else '391 Hesaplanan'} KDV - {satir.get('aciklama', '')}",
+                    )
+                    if kdv_satiri:
+                        kdv_eklenecek_satirlar.append(kdv_satiri)
+            fis_satirlari = fis_satirlari + kdv_eklenecek_satirlar
+
             kasa_karsi = {
                 "hesap_turu": "Kasa",
                 "hesap_id": grup["ana_kasa_id"],

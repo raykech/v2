@@ -5,6 +5,7 @@ from .stok_durum_raporu_view import StokDurumRaporuView
 from .hesap_ekstresi_view import HesapEkstresiView
 from .hizmet_kartlari_raporu_view import HizmetKartlariRaporuView
 from .cek_senet_raporlari_view import CekSenetRaporlariView
+from .kdv_raporu_view import KdvRaporuView
 
 class RaporlarModulu(tk.Frame):
     def __init__(self, parent, main_app):
@@ -39,6 +40,9 @@ class RaporlarModulu(tk.Frame):
         self.cek_senet_raporlari_tab = CekSenetRaporlariView(self.notebook, self.main_app)
         self.notebook.add(self.hizmet_kartlari_detay_tab, text="Hizmet Kartları Detay")
         self.notebook.add(self.cek_senet_raporlari_tab, text="Çek/Senet Raporları")
+
+        self.kdv_raporu_tab = KdvRaporuView(self.notebook, self.main_app)
+        self.notebook.add(self.kdv_raporu_tab, text="KDV Raporu")
 
     def yenile(self):
         selected_widget = self.notebook.nametowidget(self.notebook.select())

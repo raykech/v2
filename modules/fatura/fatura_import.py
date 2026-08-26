@@ -23,7 +23,7 @@ except ImportError:
     Alignment = Font = PatternFill = DataValidation = None
 
 from core.db import veritabani_baglan
-from core.services import fis_kaydet
+from core.services import fis_kaydet, kdv_hesap_idleri, kdv_satiri_olustur
 
 
 FATURA_FIS_TURLERI = [
@@ -314,6 +314,9 @@ def fatura_import_dogrula(satirlar, firma_id, aktif_yil):
     try:
         cursor = conn.cursor()
 
+        # KDV hesap ID'leri (191 İndirilecek / 391 Hesaplanan)
+        indirilecek_kdv_id, hesaplanan_kdv_id = kdv_hesap_idleri(cursor, firma_id)
+
         for index, raw_satir in enumerate(satirlar, start=2):
             row_no = index
 
@@ -442,11 +445,16 @@ def fatura_import_dogrula(satirlar, firma_id, aktif_yil):
             kdv_tutar = ara_toplam * (kdv_oran / 100.0)
             genel_toplam = ara_toplam + kdv_tutar
 
-            # Fatura satır yönü
-            if "Satış Faturası" in fis_turu or "Alış İade Faturası" in fis_turu:
-                borc, alacak = 0.0, genel_toplam
+            # Fatura satır yönü (satir_ekle ile aynı mantık)
+            # Satış → alacaklı; Alış → borçlu; Satış İade → borçlu; Alış İade → alacaklı
+            is_satis = "Satış" in fis_turu
+            is_iade = "İade" in fis_turu
+            satir_borclu = (is_satis and is_iade) or (not is_satis and not is_iade)
+            # Satır tutarı NET'tir (KDV hariç); KDV ayrı satır olarak eklenir (191/391)
+            if not satir_borclu:
+                borc, alacak = 0.0, ara_toplam
             else:
-                borc, alacak = genel_toplam, 0.0
+                borc, alacak = ara_toplam, 0.0
 
             line = {
                 "hesap_turu": "Hizmet" if is_hizmet else "Stok",
@@ -506,9 +514,25 @@ def fatura_import_dogrula(satirlar, firma_id, aktif_yil):
         toplam = grup["toplam_tutar"]
         cari_id = grup["cari_id"]
 
+        # KDV ayrı satırlarını ekle (satır ile aynı yönde; 191/391)
+        kdv_eklenecek_satirlar = []
+        for satir in fis_satirlari:
+            kdv_tutar = satir.get("kdv_tutar", 0) or 0
+            if kdv_tutar:
+                line_borclu = satir.get("borc", 0) > 0
+                kdv_hesap_id = indirilecek_kdv_id if line_borclu else hesaplanan_kdv_id
+                kdv_satiri = kdv_satiri_olustur(
+                    kdv_hesap_id, kdv_tutar,
+                    yon="borc" if line_borclu else "alacak",
+                    aciklama=f"{'191 İndirilecek' if line_borclu else '391 Hesaplanan'} KDV - {satir.get('aciklama', '')}",
+                )
+                if kdv_satiri:
+                    kdv_eklenecek_satirlar.append(kdv_satiri)
+        fis_satirlari = fis_satirlari + kdv_eklenecek_satirlar
+
         # Vadeli faturada cari karşılık satırı
         if grup["odeme_tipi"] == "Vadeli" and cari_id:
-            is_satis = ("Satış Faturası" in fis_turu) or ("Hizmet Satış" in fis_turu)
+            is_satis = "Satış" in fis_turu
             is_iade = "İade" in fis_turu
             cari_borclu = (is_satis and not is_iade) or (not is_satis and is_iade)
             fis_satirlari = fis_satirlari + [{
@@ -528,7 +552,10 @@ def fatura_import_dogrula(satirlar, firma_id, aktif_yil):
             odeme_tipi = grup["odeme_tipi"]
             odeme_hesap_id = grup["odeme_hesap_id"]
             odeme_hesap_turu = {"Nakit": "Kasa", "Banka": "Banka", "POS": "Banka"}[odeme_tipi]
-            is_tahsilat = "Satış Faturası" in fis_turu or "Alış İade Faturası" in fis_turu
+            # Tahsilat: Satış (iade değil) veya Alış İade; Ödeme: Alış (iade değil) veya Satış İade
+            is_satis_f = "Satış" in fis_turu
+            is_iade_f = "İade" in fis_turu
+            is_tahsilat = (is_satis_f and not is_iade_f) or (not is_satis_f and is_iade_f)
             odeme_fis_turu = f"Fatura Peşin Tahsilat ({odeme_tipi})" if is_tahsilat else f"Fatura Peşin Ödeme ({odeme_tipi})"
 
             pesin_odeme_data = {
@@ -540,7 +567,7 @@ def fatura_import_dogrula(satirlar, firma_id, aktif_yil):
                 "firma_id": firma_id,
                 "yil": int(grup["tarih"][:4]),
             }
-            pesin_odeme_data["satirlar"] = list(grup["fis_satirlari"])
+            pesin_odeme_data["satirlar"] = []
             pesin_odeme_data["satirlar"].append({
                 "hesap_turu": odeme_hesap_turu,
                 "hesap_id": odeme_hesap_id,

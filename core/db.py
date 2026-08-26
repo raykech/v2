@@ -241,6 +241,31 @@ def tablolari_olustur():
                 ("Diğer", tur, fid),
             )
 
+        # KDV grubu ve varsayılan KDV hesapları (191 İndirilecek KDV, 391 Hesaplanan KDV)
+        cursor.execute(
+            "INSERT OR IGNORE INTO hizmet_kartlari_gruplari (grup_adi, tur, firma_id, durum) VALUES (?, ?, ?, 1)",
+            ("KDV", "KDV", fid),
+        )
+        # KDV grubunun ID'sini al
+        cursor.execute("SELECT id FROM hizmet_kartlari_gruplari WHERE grup_adi='KDV' AND tur='KDV' AND firma_id=?", (fid,))
+        kdv_grup = cursor.fetchone()
+        kdv_grup_id = kdv_grup[0] if kdv_grup else None
+        # 191 İndirilecek KDV
+        if kdv_grup_id:
+            for kdv_kart in [
+                ("191 İndirilecek KDV", "KDV", 0, kdv_grup_id, fid),
+                ("391 Hesaplanan KDV", "KDV", 0, kdv_grup_id, fid),
+            ]:
+                cursor.execute(
+                    "SELECT id FROM hizmet_kartlari WHERE firma_id=? AND kart_adi=? AND tur='KDV'",
+                    (fid, kdv_kart[0]),
+                )
+                if not cursor.fetchone():
+                    cursor.execute(
+                        "INSERT INTO hizmet_kartlari (kart_adi, tur, kdv_oran, grup_id, firma_id, durum) VALUES (?, ?, ?, ?, ?, 1)",
+                        kdv_kart,
+                    )
+
     conn.commit()
     conn.close()
 
