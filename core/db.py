@@ -162,7 +162,6 @@ def tablolari_olustur():
             borc REAL DEFAULT 0,
             alacak REAL DEFAULT 0,
             kdv_oran REAL DEFAULT 0,
-            kdv_tutar REAL DEFAULT 0,
             firma_id INTEGER NOT NULL,
             FOREIGN KEY (fis_id) REFERENCES fisler(id) ON DELETE CASCADE
         )

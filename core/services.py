@@ -27,8 +27,8 @@ def fis_kaydet(cursor, fis_baslik, fis_satirlari, pesin_odeme_data=None, kaynak_
         satir['firma_id'] = fis_baslik['firma_id']
         cursor.execute(
             """
-            INSERT INTO fis_satirlari (fis_id, hesap_turu, hesap_id, borc, alacak, aciklama, miktar, birim_fiyat, kdv_oran, kdv_tutar, firma_id)
-            VALUES (:fis_id, :hesap_turu, :hesap_id, :borc, :alacak, :aciklama, :miktar, :birim_fiyat, :kdv_oran, :kdv_tutar, :firma_id)
+            INSERT INTO fis_satirlari (fis_id, hesap_turu, hesap_id, borc, alacak, aciklama, miktar, birim_fiyat, kdv_oran, firma_id)
+            VALUES (:fis_id, :hesap_turu, :hesap_id, :borc, :alacak, :aciklama, :miktar, :birim_fiyat, :kdv_oran, :firma_id)
             """,
             satir
         )
@@ -82,8 +82,8 @@ def fis_guncelle(cursor, fis_id, fis_baslik, fis_satirlari, pesin_odeme_data=Non
         satir['firma_id'] = fis_baslik['firma_id']
         cursor.execute(
             """
-            INSERT INTO fis_satirlari (fis_id, hesap_turu, hesap_id, borc, alacak, aciklama, miktar, birim_fiyat, kdv_oran, kdv_tutar, firma_id)
-            VALUES (:fis_id, :hesap_turu, :hesap_id, :borc, :alacak, :aciklama, :miktar, :birim_fiyat, :kdv_oran, :kdv_tutar, :firma_id)
+            INSERT INTO fis_satirlari (fis_id, hesap_turu, hesap_id, borc, alacak, aciklama, miktar, birim_fiyat, kdv_oran, firma_id)
+            VALUES (:fis_id, :hesap_turu, :hesap_id, :borc, :alacak, :aciklama, :miktar, :birim_fiyat, :kdv_oran, :firma_id)
             """,
             satir
         )
@@ -270,7 +270,6 @@ def kdv_satiri_olustur(kdv_hesap_id, kdv_tutar, yon, aciklama=""):
         "miktar": 1,
         "birim_fiyat": kdv_tutar,
         "kdv_oran": 0,
-        "kdv_tutar": 0,
     }
 
 

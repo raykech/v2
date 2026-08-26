@@ -784,7 +784,7 @@ class KasaFisiFormu(tk.Frame):
                 for satir in satirlar:
                     satir_data = dict(zip(satir_cols, satir))
                     # KDV hesap satırları otomatik yeniden üretilir, normal listeye eklenmez
-                    if satir_data['hesap_id'] in (self.indirilecek_kdv_id, self.hesaplanan_kdv_id):
+                    if satir_data['hesap_turu'] == 'Hizmet' and satir_data['hesap_id'] in (self.indirilecek_kdv_id, self.hesaplanan_kdv_id):
                         continue
                     if satir_data['hesap_turu'] == 'Kasa':
                         self.lookup_ana_kasa.set(satir_data['hesap_id'])
@@ -792,7 +792,8 @@ class KasaFisiFormu(tk.Frame):
                         hesap_adi = next((k for k, v in self.hizmet_dict.items() if v['id'] == satir_data['hesap_id']), "Bilinmeyen Hesap")
                         ara_toplam = satir_data['borc'] if is_gider else satir_data['alacak']
                         kdv_oran = satir_data.get('kdv_oran', 0)
-                        kdv_tutar = satir_data.get('kdv_tutar', 0)
+                        # kdv_tutar DB'de saklanmaz; kdv_oran'dan yeniden hesaplanir
+                        kdv_tutar = ara_toplam * kdv_oran / 100
                         miktar = satir_data.get('miktar', 1)
                         birim_fiyat = satir_data.get('birim_fiyat', ara_toplam)
                         genel_toplam = ara_toplam + kdv_tutar

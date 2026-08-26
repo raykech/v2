@@ -137,7 +137,7 @@ class KdvRaporuView(tk.Frame):
                 SELECT f.tarih, f.fis_no, f.fis_turu, fs.hesap_id, fs.aciklama, fs.borc, fs.alacak
                 FROM fis_satirlari fs
                 JOIN fisler f ON f.id = fs.fis_id
-                WHERE fs.hesap_id IN ({placeholders})
+                WHERE fs.hesap_turu = 'Hizmet' AND fs.hesap_id IN ({placeholders})
                   AND f.tarih BETWEEN ? AND ?
                   AND fs.firma_id = ?
                 ORDER BY f.tarih, f.id, fs.id

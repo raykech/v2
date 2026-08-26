@@ -751,7 +751,7 @@ class FaturaFormu(tk.Frame):
             kdv_ids = [kid for kid in (self.indirilecek_kdv_id, self.hesaplanan_kdv_id) if kid]
             if kdv_ids:
                 placeholders = ", ".join("?" * len(kdv_ids))
-                query += f" AND fs.hesap_id NOT IN ({placeholders})"
+                query += f" AND NOT (fs.hesap_turu = 'Hizmet' AND fs.hesap_id IN ({placeholders}))"
                 params.extend(kdv_ids)
 
             cursor.execute(query, params)
@@ -759,7 +759,7 @@ class FaturaFormu(tk.Frame):
             for row in cursor.fetchall():
                 satir_dict = dict(zip(satir_cols, row))
                 satir_id = str(uuid.uuid4())
-                toplam_tutar = (satir_dict['miktar'] * satir_dict['birim_fiyat']) + satir_dict['kdv_tutar']
+                toplam_tutar = (satir_dict['miktar'] * satir_dict['birim_fiyat']) + (satir_dict['miktar'] * satir_dict['birim_fiyat'] * satir_dict['kdv_oran'] / 100)
                 
                 # satir_ekle ile aynı mantık: Satış → alacaklı; Alış → borçlu; Satış İade → borçlu; Alış İade → alacaklı
                 is_line_credit = not (("Satış" in self.fis_turu and "İade" in self.fis_turu) or ("Satış" not in self.fis_turu and "İade" not in self.fis_turu))
@@ -768,11 +768,11 @@ class FaturaFormu(tk.Frame):
                 self.satirlar[satir_id] = {
                     'hesap_turu': hesap_turu_filter, 'hesap_id': satir_dict['hesap_id'], 'stok_adi': satir_dict['hesap_adi'],
                     'miktar': satir_dict['miktar'], 'birim': satir_dict['birim'], 'birim_fiyat': satir_dict['birim_fiyat'], 'aciklama': satir_dict.get('aciklama', ''),
-                    'kdv_oran': satir_dict['kdv_oran'], 'kdv_tutar': satir_dict['kdv_tutar'], 'toplam_tutar': toplam_tutar, 'borc': borc, 'alacak': alacak,
+                    'kdv_oran': satir_dict['kdv_oran'], 'kdv_tutar': satir_dict['miktar'] * satir_dict['birim_fiyat'] * satir_dict['kdv_oran'] / 100, 'toplam_tutar': toplam_tutar, 'borc': borc, 'alacak': alacak,
                 }
                 self.tree.insert("", "end", iid=satir_id, values=(
                     satir_dict['hesap_adi'], satir_dict.get('aciklama', ''), format_miktar(satir_dict['miktar']), satir_dict['birim'],
-                    format_currency(satir_dict['birim_fiyat']), format_currency(satir_dict['kdv_tutar']), format_currency(toplam_tutar), "❌"
+                    format_currency(satir_dict['birim_fiyat']), format_currency(satir_dict['miktar'] * satir_dict['birim_fiyat'] * satir_dict['kdv_oran'] / 100), format_currency(toplam_tutar), "❌"
                 ))
             
             cursor.execute("SELECT * FROM fisler WHERE kaynak_fis_id=?", (self.fis_id,))
