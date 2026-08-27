@@ -24,6 +24,7 @@ except ImportError:
 
 from core.db import veritabani_baglan
 from core.services import fis_kaydet, kdv_hesap_idleri, kdv_satiri_olustur
+from utils.formatters import kdv_hesapla
 
 
 KASA_FIS_TURLERI = [
@@ -508,9 +509,7 @@ def kasa_import_dogrula(satirlar, firma_id, aktif_yil):
                         "Miktar*Birim Fiyat esas alındı."
                     )
 
-                ara_toplam = miktar * birim_fiyat
-                kdv_tutar = ara_toplam * (kdv_oran / 100.0)
-                genel_toplam = ara_toplam + kdv_tutar
+                ara_toplam, kdv_tutar, genel_toplam = kdv_hesapla(miktar, birim_fiyat, kdv_oran)
 
                 line = {
                     "hesap_turu": "Hizmet",

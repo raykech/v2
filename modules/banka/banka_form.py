@@ -6,7 +6,7 @@ from core.db import veritabani_baglan
 from core.services import fis_kaydet, fis_guncelle, aktif_yil_kontrolu
 from ui.dialogs import ac_kart_dialog
 from ui.widgets.lookup_widget import LookupWidget
-from utils.formatters import CurrencyFormatter, parse_currency, format_miktar
+from utils.formatters import CurrencyFormatter, parse_currency, format_miktar, kdv_hesapla
 
 
 class BankaFisiFormu(tk.Frame):
@@ -417,7 +417,7 @@ class BankaFisiFormu(tk.Frame):
             miktar = parse_currency(self.ent_miktar.get())
             birim_fiyat = parse_currency(self.ent_birim_fiyat.get())
 
-            genel_toplam = miktar * birim_fiyat
+            ara_toplam, _, genel_toplam = kdv_hesapla(miktar, birim_fiyat, 0)
 
             self.lbl_satir_toplam.config(
                 text=f"{genel_toplam:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
@@ -441,8 +441,7 @@ class BankaFisiFormu(tk.Frame):
             messagebox.showwarning("Geçersiz Tutar", "Lütfen 0'dan büyük bir miktar ve birim fiyat girin.", parent=self)
             return
 
-        ara_toplam = miktar * birim_fiyat
-        genel_toplam = ara_toplam
+        ara_toplam, _, genel_toplam = kdv_hesapla(miktar, birim_fiyat, 0)
 
         yeni_satir_verisi = {
             "hesap_id": hesap_id,
@@ -795,12 +794,11 @@ class BankaFisiFormu(tk.Frame):
                         self.lookup_ana_banka.set(satir_data['hesap_id'])
                     else:
                         hesap_adi = next((k for k, v in self.hizmet_dict.items() if v['id'] == satir_data['hesap_id']), "Bilinmeyen Hesap")
-                        ara_toplam = satir_data['borc'] if is_gider else satir_data['alacak']
                         kdv_oran = satir_data.get('kdv_oran', 0)
-                        kdv_tutar = satir_data.get('kdv_tutar', 0)
                         miktar = satir_data.get('miktar', 1)
-                        birim_fiyat = satir_data.get('birim_fiyat', ara_toplam)
-                        genel_toplam = ara_toplam + kdv_tutar
+                        satir_tutari = satir_data['borc'] if is_gider else satir_data['alacak']
+                        birim_fiyat = satir_data.get('birim_fiyat') or satir_tutari
+                        ara_toplam, kdv_tutar, genel_toplam = kdv_hesapla(miktar, birim_fiyat, kdv_oran)
 
                         yeni_satir_verisi = {
                             "hesap_id": satir_data['hesap_id'],

@@ -2,11 +2,35 @@ import sqlite3
 from datetime import datetime
 import re
 
+def fis_no_kontrol(cursor, fis_no, firma_id, yil, fis_id=None):
+    """
+    Fiş numarasının aynı firma ve yıl içinde benzersiz olup olmadığını kontrol eder.
+    Boş fis_no'ya izin verilir (kontrol yapılmaz).
+    Dönüş: benzersiz ise True, kullanımda ise False.
+    """
+    if not fis_no:
+        return True
+    cursor.execute(
+        """
+        SELECT COUNT(*) FROM fisler
+        WHERE fis_no = ? AND firma_id = ? AND yil = ?
+          AND id != COALESCE(?, -1)
+        """,
+        (fis_no, firma_id, yil, fis_id),
+    )
+    return cursor.fetchone()[0] == 0
+
+
 def fis_kaydet(cursor, fis_baslik, fis_satirlari, pesin_odeme_data=None, kaynak_modul=None):
     """
     Yeni bir fişi (başlık ve satırlar) ve varsa peşin ödeme fişini veritabanına kaydeder.
     Tüm işlemler tek bir transaction içinde yapılır.
     """
+    # Aynı firma ve yıl içinde fiş numarası tekrarı olmamalı
+    fis_no = str(fis_baslik.get('fis_no') or '').strip()
+    if fis_no and not fis_no_kontrol(cursor, fis_no, fis_baslik['firma_id'], fis_baslik['yil']):
+        raise ValueError(f"'{fis_no}' fiş numarası bu firma ve yıl için zaten kullanılıyor.")
+
     # 1. Ana Fiş başlığını 'fisler' tablosuna ekle
     cursor.execute(
         """
@@ -61,6 +85,11 @@ def fis_guncelle(cursor, fis_id, fis_baslik, fis_satirlari, pesin_odeme_data=Non
     """
     Mevcut bir fişi (başlık ve satırlar) ve varsa peşin ödeme fişini günceller.
     """
+    # Aynı firma ve yıl içinde fiş numarası tekrarı olmamalı (kendi fişi hariç)
+    fis_no = str(fis_baslik.get('fis_no') or '').strip()
+    if fis_no and not fis_no_kontrol(cursor, fis_no, fis_baslik['firma_id'], fis_baslik['yil'], fis_id=fis_id):
+        raise ValueError(f"'{fis_no}' fiş numarası bu firma ve yıl için zaten kullanılıyor.")
+
     # 1. Ana Fiş başlığını güncelle
     fis_baslik['id'] = fis_id
     fis_baslik['kaynak_modul'] = kaynak_modul # Ensure kaynak_modul is in fis_baslik for the UPDATE statement
@@ -135,11 +164,21 @@ def fis_sil(cursor, fis_id, firma_id):
         cursor.execute("DELETE FROM fisler WHERE id = ? AND firma_id = ?", (bagli_fis_id, firma_id))
 
 
+# Tanım kartı işlemlerinde kullanılmasına izin verilen tablolar (SQL enjeksiyonuna karşı whitelist)
+GECERLI_KART_TABLOLARI = {
+    "cariler", "stoklar", "kasalar", "banka_hesaplari",
+    "hizmet_kartlari", "genel_tanimlar", "banka_kurumlari",
+    "hizmet_kartlari_gruplari",
+}
+
 def is_kart_kullanilmis_mi(cursor, tablo_adi, kart_id, firma_id):
     """
     Bir tanım kartının herhangi bir fişte, fiş satırında veya yapısal olarak
     başka bir tanımda (alt kategori gibi) kullanılıp kullanılmadığını kontrol eder.
     """
+    if tablo_adi not in GECERLI_KART_TABLOLARI:
+        raise ValueError(f"Geçersiz veya izin verilmeyen tablo adı: {tablo_adi}")
+
     # 1. Yapısal Bağımlılık Kontrolü (Parent-child ilişkileri)
     # Bir banka kurumu, altında hesap kartları varken silinemez.
     if tablo_adi == "banka_kurumlari":
@@ -175,18 +214,15 @@ def kart_sil(cursor, tablo_adi, kart_id, firma_id):
     Verilen ID'ye sahip tanım kartını siler.
     İşlemlerde kullanılıp kullanılmadığını kontrol eder.
     """
+    if tablo_adi not in GECERLI_KART_TABLOLARI:
+        raise ValueError(f"Geçersiz veya izin verilmeyen tablo adı: {tablo_adi}")
+
     if is_kart_kullanilmis_mi(cursor, tablo_adi, kart_id, firma_id):
         raise ValueError(f"Bu kart işlemlerde kullanıldığı için silinemez.")
 
     cursor.execute(f"DELETE FROM {tablo_adi} WHERE id = ? AND firma_id = ?", (kart_id, firma_id))
     if cursor.rowcount == 0:
         raise ValueError("Silinecek kart bulunamadı veya silme yetkiniz yok.")
-
-GECERLI_KART_TABLOLARI = {
-    "cariler", "stoklar", "kasalar", "banka_hesaplari",
-    "hizmet_kartlari", "genel_tanimlar", "banka_kurumlari",
-    "hizmet_kartlari_gruplari",
-}
 
 def kaydet_kart(cursor, tablo_adi, veri_sozlugu):
     """

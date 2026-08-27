@@ -5,7 +5,7 @@ from datetime import datetime
 import uuid
 from core.db import veritabani_baglan
 from core.services import fis_kaydet, fis_guncelle, kdv_satiri_olustur, aktif_yil_kontrolu
-from utils.formatters import format_currency, parse_currency, CurrencyFormatter, format_miktar
+from utils.formatters import format_currency, parse_currency, CurrencyFormatter, format_miktar, kdv_hesapla
 from ui.widgets.lookup_widget import LookupWidget
 from ui.dialogs import ac_kart_dialog
 
@@ -441,9 +441,7 @@ class FaturaFormu(tk.Frame):
             if genel > 0 and miktar > 0:
                 birim_fiyat = genel / (miktar * (1 + kdv_oran / 100))
 
-            ara_toplam = miktar * birim_fiyat
-            kdv_tutar = ara_toplam * kdv_oran / 100
-            toplam = ara_toplam + kdv_tutar
+            ara_toplam, kdv_tutar, toplam = kdv_hesapla(miktar, birim_fiyat, kdv_oran)
             self.lbl_satir_toplam.config(text=format_currency(toplam).replace(" TL", ""))
         except (ValueError, TypeError, ZeroDivisionError):
             self.lbl_satir_toplam.config(text="0,00")
@@ -488,9 +486,7 @@ class FaturaFormu(tk.Frame):
         if not self.is_hizmet_faturasi:
             birim = self.stok_dict[hesap_adi]['birim']
 
-        ara_toplam = miktar * birim_fiyat
-        kdv_tutar = ara_toplam * kdv_oran / 100
-        toplam_tutar = ara_toplam + kdv_tutar
+        ara_toplam, kdv_tutar, toplam_tutar = kdv_hesapla(miktar, birim_fiyat, kdv_oran)
 
         satir_verisi = {
             'hesap_turu': 'Hizmet' if self.is_hizmet_faturasi else 'Stok',
@@ -759,7 +755,7 @@ class FaturaFormu(tk.Frame):
             for row in cursor.fetchall():
                 satir_dict = dict(zip(satir_cols, row))
                 satir_id = str(uuid.uuid4())
-                toplam_tutar = (satir_dict['miktar'] * satir_dict['birim_fiyat']) + (satir_dict['miktar'] * satir_dict['birim_fiyat'] * satir_dict['kdv_oran'] / 100)
+                ara_toplam, kdv_tutar, toplam_tutar = kdv_hesapla(satir_dict['miktar'], satir_dict['birim_fiyat'], satir_dict['kdv_oran'])
                 
                 # satir_ekle ile aynı mantık: Satış → alacaklı; Alış → borçlu; Satış İade → borçlu; Alış İade → alacaklı
                 is_line_credit = not (("Satış" in self.fis_turu and "İade" in self.fis_turu) or ("Satış" not in self.fis_turu and "İade" not in self.fis_turu))
@@ -768,11 +764,11 @@ class FaturaFormu(tk.Frame):
                 self.satirlar[satir_id] = {
                     'hesap_turu': hesap_turu_filter, 'hesap_id': satir_dict['hesap_id'], 'stok_adi': satir_dict['hesap_adi'],
                     'miktar': satir_dict['miktar'], 'birim': satir_dict['birim'], 'birim_fiyat': satir_dict['birim_fiyat'], 'aciklama': satir_dict.get('aciklama', ''),
-                    'kdv_oran': satir_dict['kdv_oran'], 'kdv_tutar': satir_dict['miktar'] * satir_dict['birim_fiyat'] * satir_dict['kdv_oran'] / 100, 'toplam_tutar': toplam_tutar, 'borc': borc, 'alacak': alacak,
+                    'kdv_oran': satir_dict['kdv_oran'], 'kdv_tutar': kdv_tutar, 'toplam_tutar': toplam_tutar, 'borc': borc, 'alacak': alacak,
                 }
                 self.tree.insert("", "end", iid=satir_id, values=(
                     satir_dict['hesap_adi'], satir_dict.get('aciklama', ''), format_miktar(satir_dict['miktar']), satir_dict['birim'],
-                    format_currency(satir_dict['birim_fiyat']), format_currency(satir_dict['miktar'] * satir_dict['birim_fiyat'] * satir_dict['kdv_oran'] / 100), format_currency(toplam_tutar), "❌"
+                    format_currency(satir_dict['birim_fiyat']), format_currency(kdv_tutar), format_currency(toplam_tutar), "❌"
                 ))
             
             cursor.execute("SELECT * FROM fisler WHERE kaynak_fis_id=?", (self.fis_id,))

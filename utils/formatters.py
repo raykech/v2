@@ -1,5 +1,26 @@
 from datetime import datetime
 import tkinter as tk
+from decimal import Decimal, ROUND_HALF_UP, InvalidOperation
+
+
+def kdv_hesapla(miktar, birim_fiyat, kdv_oran):
+    """
+    Miktar * birim fiyat üzerinden KDV'li tutarları ticari yuvarlama (ROUND_HALF_UP)
+    ile 2 ondalık basamağa yuvarlayarak hesaplar. Kayan nokta (float) tutarsızlıklarını
+    önlemek için Decimal kullanır.
+
+    Dönüş: (ara_toplam, kdv_tutar, genel_toplam) — üçü de float, 2 ondalık basamak.
+    genel_toplam = ara_toplam + kdv_tutar (tam toplam, kuruş farkı olmaz).
+    """
+    try:
+        ara = Decimal(str(miktar)) * Decimal(str(birim_fiyat))
+    except (InvalidOperation, ValueError):
+        return 0.0, 0.0, 0.0
+    ara_toplam = ara.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+    kdv = ara_toplam * (Decimal(str(kdv_oran)) / Decimal('100'))
+    kdv_tutar = kdv.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+    genel_toplam = ara_toplam + kdv_tutar
+    return float(ara_toplam), float(kdv_tutar), float(genel_toplam)
 
 def format_currency(amount):
     """

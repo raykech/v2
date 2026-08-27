@@ -24,6 +24,7 @@ except ImportError:
 
 from core.db import veritabani_baglan
 from core.services import fis_kaydet
+from utils.formatters import kdv_hesapla
 
 
 BANKA_FIS_TURLERI = [
@@ -594,9 +595,7 @@ def banka_import_dogrula(satirlar, firma_id, aktif_yil):
                 if tutar is not None and abs(miktar * birim_fiyat - tutar) > 0.01:
                     uyarilar.append(f"Satır {row_no}: Girilen Tutar ile Miktar*Birim Fiyat farklı. Miktar*Birim Fiyat esas alındı.")
 
-                ara_toplam = miktar * birim_fiyat
-                kdv_tutar = 0.0
-                genel_toplam = ara_toplam
+                ara_toplam, kdv_tutar, genel_toplam = kdv_hesapla(miktar, birim_fiyat, kdv_oran)
 
                 line = {
                     "hesap_turu": "Hizmet",

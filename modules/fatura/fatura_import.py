@@ -24,6 +24,7 @@ except ImportError:
 
 from core.db import veritabani_baglan
 from core.services import fis_kaydet, kdv_hesap_idleri, kdv_satiri_olustur
+from utils.formatters import kdv_hesapla
 
 
 FATURA_FIS_TURLERI = [
@@ -441,9 +442,7 @@ def fatura_import_dogrula(satirlar, firma_id, aktif_yil):
             if tutar is not None and abs(miktar * birim_fiyat - tutar) > 0.01:
                 uyarilar.append(f"Satır {row_no}: Girilen Tutar ile Miktar*Birim Fiyat farklı. Miktar*Birim Fiyat esas alındı.")
 
-            ara_toplam = miktar * birim_fiyat
-            kdv_tutar = ara_toplam * (kdv_oran / 100.0)
-            genel_toplam = ara_toplam + kdv_tutar
+            ara_toplam, kdv_tutar, genel_toplam = kdv_hesapla(miktar, birim_fiyat, kdv_oran)
 
             # Fatura satır yönü (satir_ekle ile aynı mantık)
             # Satış → alacaklı; Alış → borçlu; Satış İade → borçlu; Alış İade → alacaklı
