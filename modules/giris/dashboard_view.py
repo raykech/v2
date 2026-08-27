@@ -73,8 +73,10 @@ class GirisDashboardView(tk.Frame):
 
             # 1. Kasa toplam bakiye (tüm kasalar)
             c.execute(
-                "SELECT COALESCE(SUM(borc),0) - COALESCE(SUM(alacak),0) "
-                "FROM fis_satirlari WHERE hesap_turu='Kasa' AND firma_id=?", (fid,)
+                """SELECT COALESCE(SUM(fs.borc),0) - COALESCE(SUM(fs.alacak),0)
+                   FROM fis_satirlari fs
+                   JOIN fisler f ON f.id = fs.fis_id
+                   WHERE fs.hesap_turu='Kasa' AND fs.firma_id=?""", (fid,)
             )
             veriler["kasa"] = c.fetchone()[0] or 0.0
 
@@ -83,6 +85,7 @@ class GirisDashboardView(tk.Frame):
                 """SELECT COALESCE(SUM(fs.borc),0) - COALESCE(SUM(fs.alacak),0)
                    FROM fis_satirlari fs
                    JOIN banka_hesaplari b ON b.id = fs.hesap_id
+                   JOIN fisler f ON f.id = fs.fis_id
                    WHERE fs.hesap_turu='Banka' AND b.hesap_turu='Vadesiz' AND fs.firma_id=?""", (fid,)
             )
             veriler["banka"] = c.fetchone()[0] or 0.0
@@ -92,6 +95,7 @@ class GirisDashboardView(tk.Frame):
                 """SELECT COALESCE(SUM(fs.borc),0) - COALESCE(SUM(fs.alacak),0)
                    FROM fis_satirlari fs
                    JOIN banka_hesaplari b ON b.id = fs.hesap_id
+                   JOIN fisler f ON f.id = fs.fis_id
                    WHERE fs.hesap_turu='Banka' AND b.hesap_turu='POS' AND fs.firma_id=?""", (fid,)
             )
             veriler["pos"] = c.fetchone()[0] or 0.0
@@ -102,7 +106,8 @@ class GirisDashboardView(tk.Frame):
                    FROM cariler cari
                    LEFT JOIN fis_satirlari fs
                      ON fs.hesap_turu='Cari' AND fs.hesap_id = cari.id AND fs.firma_id = ?
-                   WHERE cari.firma_id = ?
+                   LEFT JOIN fisler f ON f.id = fs.fis_id
+                   WHERE cari.firma_id = ? AND (fs.fis_id IS NULL OR f.id IS NOT NULL)
                    GROUP BY cari.id""", (fid, fid)
             )
             for (bakiye,) in c.fetchall():
@@ -114,8 +119,10 @@ class GirisDashboardView(tk.Frame):
 
             # 6. Eldeki stok maliyet değeri (FIFO) — stok raporundaki mantıkla aynı
             c.execute(
-                """SELECT hesap_id, SUM(CASE WHEN borc>0 THEN miktar WHEN alacak>0 THEN -miktar ELSE 0 END)
-                   FROM fis_satirlari WHERE hesap_turu='Stok' AND firma_id=? GROUP BY hesap_id""", (fid,)
+                """SELECT fs.hesap_id, SUM(CASE WHEN fs.borc>0 THEN fs.miktar WHEN fs.alacak>0 THEN -fs.miktar ELSE 0 END)
+                   FROM fis_satirlari fs
+                   JOIN fisler f ON f.id = fs.fis_id
+                   WHERE fs.hesap_turu='Stok' AND fs.firma_id=? GROUP BY fs.hesap_id""", (fid,)
             )
             stok_bakiyeleri = {r[0]: r[1] for r in c.fetchall()}
 
