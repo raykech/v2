@@ -3,7 +3,7 @@ from tkinter import ttk, messagebox
 from tkcalendar import DateEntry
 from datetime import datetime
 from core.db import veritabani_baglan
-from utils.formatters import format_currency, format_date
+from utils.formatters import format_currency, format_date, format_miktar
 from utils.export import export_treeview_data
 
 class HesapEkstresiView(tk.Frame):
@@ -46,22 +46,45 @@ class HesapEkstresiView(tk.Frame):
         tree_container = tk.Frame(self)
         tree_container.pack(fill="both", expand=True, padx=10, pady=(0, 10))
 
-        self.tree = ttk.Treeview(tree_container, columns=("tarih", "fis_no", "fis_turu", "aciklama", "borc", "alacak", "bakiye"), show="headings")
-        self.tree.heading("tarih", text="Tarih")
-        self.tree.heading("fis_no", text="Fiş No")
-        self.tree.heading("fis_turu", text="Fiş Türü")
-        self.tree.heading("aciklama", text="Açıklama")
-        self.tree.heading("borc", text="Borç", anchor="e")
-        self.tree.heading("alacak", text="Alacak", anchor="e")
-        self.tree.heading("bakiye", text="Bakiye", anchor="e")
-
-        self.tree.column("tarih", width=100, stretch=False, anchor="center")
-        self.tree.column("fis_no", width=100, stretch=False)
-        self.tree.column("fis_turu", width=180, stretch=False)
-        self.tree.column("aciklama", width=300)
-        self.tree.column("borc", width=120, stretch=False, anchor="e")
-        self.tree.column("alacak", width=120, stretch=False, anchor="e")
-        self.tree.column("bakiye", width=120, stretch=False, anchor="e")
+        self.stok_mu = self.hesap_turu == "Stok"
+        if self.stok_mu:
+            self.tree = ttk.Treeview(tree_container, columns=("tarih", "fis_no", "fis_turu", "aciklama", "giris_miktar", "giris_tutar", "cikis_miktar", "cikis_tutar", "kalan_miktar", "kalan_maliyet"), show="headings")
+            self.tree.heading("tarih", text="Tarih")
+            self.tree.heading("fis_no", text="Fiş No")
+            self.tree.heading("fis_turu", text="Fiş Türü")
+            self.tree.heading("aciklama", text="Açıklama")
+            self.tree.heading("giris_miktar", text="Giriş", anchor="e")
+            self.tree.heading("giris_tutar", text="Giriş Maliyet", anchor="e")
+            self.tree.heading("cikis_miktar", text="Çıkış", anchor="e")
+            self.tree.heading("cikis_tutar", text="Çıkış Maliyet", anchor="e")
+            self.tree.heading("kalan_miktar", text="Kalan Miktar", anchor="e")
+            self.tree.heading("kalan_maliyet", text="Kalan Maliyet", anchor="e")
+            self.tree.column("tarih", width=100, stretch=False, anchor="center")
+            self.tree.column("fis_no", width=100, stretch=False)
+            self.tree.column("fis_turu", width=180, stretch=False)
+            self.tree.column("aciklama", width=250)
+            self.tree.column("giris_miktar", width=90, stretch=False, anchor="e")
+            self.tree.column("giris_tutar", width=110, stretch=False, anchor="e")
+            self.tree.column("cikis_miktar", width=90, stretch=False, anchor="e")
+            self.tree.column("cikis_tutar", width=110, stretch=False, anchor="e")
+            self.tree.column("kalan_miktar", width=100, stretch=False, anchor="e")
+            self.tree.column("kalan_maliyet", width=120, stretch=False, anchor="e")
+        else:
+            self.tree = ttk.Treeview(tree_container, columns=("tarih", "fis_no", "fis_turu", "aciklama", "borc", "alacak", "bakiye"), show="headings")
+            self.tree.heading("tarih", text="Tarih")
+            self.tree.heading("fis_no", text="Fiş No")
+            self.tree.heading("fis_turu", text="Fiş Türü")
+            self.tree.heading("aciklama", text="Açıklama")
+            self.tree.heading("borc", text="Borç", anchor="e")
+            self.tree.heading("alacak", text="Alacak", anchor="e")
+            self.tree.heading("bakiye", text="Bakiye", anchor="e")
+            self.tree.column("tarih", width=100, stretch=False, anchor="center")
+            self.tree.column("fis_no", width=100, stretch=False)
+            self.tree.column("fis_turu", width=180, stretch=False)
+            self.tree.column("aciklama", width=300)
+            self.tree.column("borc", width=120, stretch=False, anchor="e")
+            self.tree.column("alacak", width=120, stretch=False, anchor="e")
+            self.tree.column("bakiye", width=120, stretch=False, anchor="e")
 
         vsb = ttk.Scrollbar(tree_container, orient="vertical", command=self.tree.yview)
         hsb = ttk.Scrollbar(tree_container, orient="horizontal", command=self.tree.xview)
@@ -107,6 +130,12 @@ class HesapEkstresiView(tk.Frame):
             conn = veritabani_baglan()
             cursor = conn.cursor()
 
+            # Stok ekstresi: FIFO maliyetli, miktar + tutar birlikte
+            if self.stok_mu:
+                self._stok_listele(cursor, hesap_id, bas_tarih, bit_tarih)
+                return
+
+            # ---- Para bazlı ekstreler (Cari/Kasa/Banka/Hizmet) ----
             # 1. Devir Bakiyesini Hesapla
             cursor.execute("""
                 SELECT SUM(borc) - SUM(alacak) FROM fis_satirlari fs
@@ -170,6 +199,114 @@ class HesapEkstresiView(tk.Frame):
             messagebox.showerror("Veri Yükleme Hatası", f"Ekstre yüklenemedi: {e}", parent=self)
         finally:
             if conn: conn.close()
+
+    def _stok_listele(self, cursor, hesap_id, bas_tarih, bit_tarih):
+        """Stok ekstresini FIFO maliyet yöntemiyle listeler (miktar + maliyet)."""
+        # Tüm stok hareketlerini tarih sırasıyla çek (devir dahil)
+        cursor.execute("""
+            SELECT f.tarih, f.id as fis_id, f.fis_no, f.fis_turu, fs.aciklama,
+                   fs.miktar, fs.birim_fiyat, fs.borc, fs.alacak
+            FROM fis_satirlari fs
+            JOIN fisler f ON f.id = fs.fis_id
+            WHERE fs.hesap_turu = ? AND fs.hesap_id = ? AND fs.firma_id = ?
+            ORDER BY f.tarih, f.id
+        """, (self.hesap_turu, hesap_id, self.main_app.aktif_firma_id))
+        hareketler = cursor.fetchall()
+
+        # FIFO katmanları: her biri [kalan_miktar, birim_fiyat]
+        fifo_layers = []
+        kalan_miktar = 0.0
+        kalan_maliyet = 0.0
+
+        # Devir (bas_tarih öncesi)
+        for tarih, fis_id, fis_no, fis_turu, aciklama, miktar, birim_fiyat, borc, alacak in hareketler:
+            if tarih >= bas_tarih:
+                break
+            if borc and borc > 0:
+                fifo_layers.append([miktar, birim_fiyat])
+                kalan_miktar += miktar
+                kalan_maliyet += miktar * birim_fiyat
+            elif alacak and alacak > 0:
+                cikis_maliyet = self._fifo_cikis(fifo_layers, miktar)
+                kalan_miktar -= miktar
+                kalan_maliyet -= cikis_maliyet
+
+        # Devir satırı
+        self.tree.insert("", "end", values=(
+            "", "", "DEVİR", "",
+            "", "", "", "",
+            format_miktar(kalan_miktar), format_currency(kalan_maliyet)
+        ), tags=('devir',))
+
+        # Dönem hareketleri
+        toplam_giris_miktar = 0.0
+        toplam_giris_tutar = 0.0
+        toplam_cikis_miktar = 0.0
+        toplam_cikis_tutar = 0.0
+
+        for tarih, fis_id, fis_no, fis_turu, aciklama, miktar, birim_fiyat, borc, alacak in hareketler:
+            if tarih < bas_tarih:
+                continue
+            if tarih > bit_tarih:
+                break
+
+            if borc and borc > 0:
+                giris_miktar = miktar
+                giris_tutar = miktar * birim_fiyat
+                cikis_miktar = 0.0
+                cikis_tutar = 0.0
+                fifo_layers.append([miktar, birim_fiyat])
+                kalan_miktar += miktar
+                kalan_maliyet += giris_tutar
+            elif alacak and alacak > 0:
+                giris_miktar = 0.0
+                giris_tutar = 0.0
+                cikis_miktar = miktar
+                cikis_tutar = self._fifo_cikis(fifo_layers, miktar)
+                kalan_miktar -= miktar
+                kalan_maliyet -= cikis_tutar
+            else:
+                continue
+
+            toplam_giris_miktar += giris_miktar
+            toplam_giris_tutar += giris_tutar
+            toplam_cikis_miktar += cikis_miktar
+            toplam_cikis_tutar += cikis_tutar
+
+            self.tree.insert("", "end", values=(
+                format_date(tarih), fis_no, fis_turu, aciklama,
+                format_miktar(giris_miktar), format_currency(giris_tutar),
+                format_miktar(cikis_miktar), format_currency(cikis_tutar),
+                format_miktar(kalan_miktar), format_currency(kalan_maliyet)
+            ))
+
+        # Alt toplamlar
+        self.tree.insert("", "end", values=("", "", "", "", "", "", "", "", "", ""), tags=('separator',))
+        self.tree.insert("", "end", values=(
+            "", "", "ARA TOPLAM", "",
+            format_miktar(toplam_giris_miktar), format_currency(toplam_giris_tutar),
+            format_miktar(toplam_cikis_miktar), format_currency(toplam_cikis_tutar),
+            "", ""
+        ), tags=('toplam',))
+        self.tree.insert("", "end", values=(
+            "", "", "GENEL BAKİYE", "",
+            "", "", "", "",
+            format_miktar(kalan_miktar), format_currency(kalan_maliyet)
+        ), tags=('bakiye',))
+
+    def _fifo_cikis(self, fifo_layers, miktar):
+        """FIFO kuyruğundan miktar kadar çıkış yapar ve çıkış maliyetini döndürür."""
+        kalan = miktar
+        toplam_maliyet = 0.0
+        while kalan > 0 and fifo_layers:
+            katman = fifo_layers[0]
+            kullanilacak = min(kalan, katman[0])
+            toplam_maliyet += kullanilacak * katman[1]
+            katman[0] -= kullanilacak
+            kalan -= kullanilacak
+            if katman[0] <= 0:
+                fifo_layers.pop(0)
+        return toplam_maliyet
 
     def disari_aktar(self, format_type):
         secili_hesap_adi = self.cmb_hesap_filtre.get()

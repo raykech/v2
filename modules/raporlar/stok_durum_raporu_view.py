@@ -87,8 +87,10 @@ class StokDurumRaporuView(tk.Frame):
 
             # 1. Stok bakiyelerini hesapla
             cursor.execute("""
-                SELECT hesap_id, SUM(CASE WHEN borc > 0 THEN miktar WHEN alacak > 0 THEN -miktar ELSE 0 END)
-                FROM fis_satirlari WHERE hesap_turu = 'Stok' AND firma_id = ? GROUP BY hesap_id
+                SELECT fs.hesap_id, SUM(CASE WHEN fs.borc > 0 THEN fs.miktar WHEN fs.alacak > 0 THEN -fs.miktar ELSE 0 END)
+                FROM fis_satirlari fs
+                JOIN fisler f ON f.id = fs.fis_id
+                WHERE fs.hesap_turu = 'Stok' AND fs.firma_id = ? GROUP BY fs.hesap_id
             """, (self.main_app.aktif_firma_id,))
             stock_balances = {row[0]: row[1] for row in cursor.fetchall()}
 

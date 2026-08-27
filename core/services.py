@@ -2,22 +2,27 @@ import sqlite3
 from datetime import datetime
 import re
 
-def fis_no_kontrol(cursor, fis_no, firma_id, yil, fis_id=None):
+def fis_no_kontrol(cursor, fis_no, firma_id, yil, fis_id=None, tarih=None):
     """
-    Fiş numarasının aynı firma ve yıl içinde benzersiz olup olmadığını kontrol eder.
+    Fiş numarasının aynı firma, yıl ve (verilmişse) tarih içinde benzersiz olup
+    olmadığını kontrol eder.
+    Aynı fiş numarası farklı tarihlerde kullanılabilir (ör. aynı fatura no farklı
+    tarihlerde tekrarlanabilir); yalnızca aynı tarih içinde tekrar engellenir.
     Boş fis_no'ya izin verilir (kontrol yapılmaz).
     Dönüş: benzersiz ise True, kullanımda ise False.
     """
     if not fis_no:
         return True
-    cursor.execute(
-        """
+    query = """
         SELECT COUNT(*) FROM fisler
         WHERE fis_no = ? AND firma_id = ? AND yil = ?
           AND id != COALESCE(?, -1)
-        """,
-        (fis_no, firma_id, yil, fis_id),
-    )
+    """
+    params = [fis_no, firma_id, yil, fis_id]
+    if tarih:
+        query += " AND tarih = ?"
+        params.append(tarih)
+    cursor.execute(query, params)
     return cursor.fetchone()[0] == 0
 
 
@@ -26,10 +31,10 @@ def fis_kaydet(cursor, fis_baslik, fis_satirlari, pesin_odeme_data=None, kaynak_
     Yeni bir fişi (başlık ve satırlar) ve varsa peşin ödeme fişini veritabanına kaydeder.
     Tüm işlemler tek bir transaction içinde yapılır.
     """
-    # Aynı firma ve yıl içinde fiş numarası tekrarı olmamalı
+    # Aynı firma, yıl ve tarih içinde fiş numarası tekrarı olmamalı
     fis_no = str(fis_baslik.get('fis_no') or '').strip()
-    if fis_no and not fis_no_kontrol(cursor, fis_no, fis_baslik['firma_id'], fis_baslik['yil']):
-        raise ValueError(f"'{fis_no}' fiş numarası bu firma ve yıl için zaten kullanılıyor.")
+    if fis_no and not fis_no_kontrol(cursor, fis_no, fis_baslik['firma_id'], fis_baslik['yil'], tarih=fis_baslik.get('tarih')):
+        raise ValueError(f"'{fis_no}' fiş numarası bu firma, yıl ve tarih için zaten kullanılıyor.")
 
     # 1. Ana Fiş başlığını 'fisler' tablosuna ekle
     cursor.execute(
@@ -85,10 +90,10 @@ def fis_guncelle(cursor, fis_id, fis_baslik, fis_satirlari, pesin_odeme_data=Non
     """
     Mevcut bir fişi (başlık ve satırlar) ve varsa peşin ödeme fişini günceller.
     """
-    # Aynı firma ve yıl içinde fiş numarası tekrarı olmamalı (kendi fişi hariç)
+    # Aynı firma, yıl ve tarih içinde fiş numarası tekrarı olmamalı (kendi fişi hariç)
     fis_no = str(fis_baslik.get('fis_no') or '').strip()
-    if fis_no and not fis_no_kontrol(cursor, fis_no, fis_baslik['firma_id'], fis_baslik['yil'], fis_id=fis_id):
-        raise ValueError(f"'{fis_no}' fiş numarası bu firma ve yıl için zaten kullanılıyor.")
+    if fis_no and not fis_no_kontrol(cursor, fis_no, fis_baslik['firma_id'], fis_baslik['yil'], fis_id=fis_id, tarih=fis_baslik.get('tarih')):
+        raise ValueError(f"'{fis_no}' fiş numarası bu firma, yıl ve tarih için zaten kullanılıyor.")
 
     # 1. Ana Fiş başlığını güncelle
     fis_baslik['id'] = fis_id

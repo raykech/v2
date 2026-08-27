@@ -325,9 +325,7 @@ class BankaModulu(tk.Frame):
                 eklenen_ids = banka_fislerini_kaydet(cursor, hazir_fisler, self.main_app.aktif_firma_id, self.main_app.aktif_yil)
                 conn.commit()
                 import_basarili = True
-                fis_nolar = [f.get("fis_no") or "(boş)" for f in hazir_fisler]
-                mesaj = f"{len(eklenen_ids)} fiş başarıyla içe aktarıldı.\nFiş No: {', '.join(fis_nolar)}"
-                messagebox.showinfo("Başarılı", mesaj, parent=self)
+                messagebox.showinfo("Başarılı", f"{len(eklenen_ids)} fiş başarıyla içe aktarıldı.", parent=self)
                 return True
             except Exception as e:
                 if conn:

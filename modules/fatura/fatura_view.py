@@ -271,9 +271,7 @@ class FaturaModulu(tk.Frame):
                 eklenen_ids = fatura_fislerini_kaydet(cursor, hazir_faturalar, self.main_app.aktif_firma_id, self.main_app.aktif_yil)
                 conn.commit()
                 import_basarili = True
-                fis_nolar = [f.get("fis_no") or "(boş)" for f in hazir_faturalar]
-                mesaj = f"{len(eklenen_ids)} fatura başarıyla içe aktarıldı.\nFatura No: {', '.join(fis_nolar)}"
-                messagebox.showinfo("Başarılı", mesaj, parent=self)
+                messagebox.showinfo("Başarılı", f"{len(eklenen_ids)} fatura başarıyla içe aktarıldı.", parent=self)
                 return True
             except Exception as e:
                 if conn:
