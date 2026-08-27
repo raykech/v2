@@ -413,10 +413,12 @@ class BankaFisiFormu(tk.Frame):
 
     def yeni_kart_ekle(self, tablo_adi, kart_turu=None):
         """Lookup widget'larından yeni kart ekleme işlemini yönetir."""
-        ac_kart_dialog(self, tablo_adi, firma_id=self.main_app.aktif_firma_id, kart_turu=kart_turu)
-        self.verileri_yukle()
-        self.ayarla_form_yapisi()
-        self._setup_hesap_lookup()
+        sonuc = ac_kart_dialog(self, tablo_adi, firma_id=self.main_app.aktif_firma_id, kart_turu=kart_turu)
+        if sonuc:
+            self.verileri_yukle()
+            self.ayarla_form_yapisi()
+            self._setup_hesap_lookup()
+        return sonuc
 
     def hesapla_satir_toplami(self, *args):
         """Satır toplamını hesaplar (banka fişleri KDV'sizdir)."""

@@ -424,6 +424,11 @@ class FaturaFormu(tk.Frame):
 
     def odeme_tipi_degisti(self, event=None):
         tip = self.cmb_odeme_tipi.get()
+        # Kullanıcı ödeme tipini değiştirdiğinde eski hesap seçimini sıfırla
+        # (event None ise düzenleme yüklemesi/veri yenileme; seçim sonradan set edilir)
+        if event is not None:
+            self.lookup_odeme_hesap.clear()
+            self.lookup_cari.clear()
         if tip == "Vadeli":
             self.lbl_odeme_hesap.grid_remove()
             self.lookup_odeme_hesap.grid_remove()

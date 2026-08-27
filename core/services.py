@@ -117,7 +117,10 @@ def fis_guncelle(cursor, fis_id, fis_baslik, fis_satirlari, pesin_odeme_data=Non
             satir
         )
 
-    # 4. Eski peşin ödeme fişini sil
+    # 4. Eski peşin ödeme fişini sil (önce satırlarını açıkça temizle)
+    cursor.execute("SELECT id FROM fisler WHERE kaynak_fis_id = ?", (fis_id,))
+    for eski_fis_id in [r[0] for r in cursor.fetchall()]:
+        cursor.execute("DELETE FROM fis_satirlari WHERE fis_id = ?", (eski_fis_id,))
     cursor.execute("DELETE FROM fisler WHERE kaynak_fis_id = ?", (fis_id,))
 
     # 5. Yeni peşin ödeme fişini kaydet (varsa)
@@ -155,10 +158,18 @@ def fis_sil(cursor, fis_id, firma_id):
     cursor.execute("SELECT id FROM fisler WHERE kaynak_fis_id = ? AND firma_id = ?", (fis_id, firma_id))
     bagli_fis = cursor.fetchone()
 
-    # Önce ana fişi sil (ON DELETE CASCADE satırları otomatik siler)
+    # Satırları önce açıkça sil (PRAGMA foreign_keys kapalı olsa bile yetim satır kalmasın)
+    cursor.execute("DELETE FROM fis_satirlari WHERE fis_id = ? AND firma_id = ?", (fis_id, firma_id))
+    if bagli_fis:
+        cursor.execute(
+            "DELETE FROM fis_satirlari WHERE fis_id = ? AND firma_id = ?",
+            (bagli_fis[0], firma_id),
+        )
+
+    # Ana fişi sil
     cursor.execute("DELETE FROM fisler WHERE id = ? AND firma_id = ?", (fis_id, firma_id))
 
-    # Eğer bağlı bir fiş varsa, onu da sil (ON DELETE CASCADE onun da satırlarını siler)
+    # Eğer bağlı bir fiş varsa, onu da sil
     if bagli_fis:
         bagli_fis_id = bagli_fis[0]
         cursor.execute("DELETE FROM fisler WHERE id = ? AND firma_id = ?", (bagli_fis_id, firma_id))

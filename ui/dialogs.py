@@ -7,6 +7,7 @@ from core.db import (
 )
 from core.services import kaydet_kart
 from utils.formatters import parse_currency
+from ui.widgets.lookup_widget import LookupWidget
 
 def ac_kart_dialog(parent, tablo_adi, item_id=None, firma_id=1, kart_turu=None):
     dialog_map = {
@@ -14,6 +15,7 @@ def ac_kart_dialog(parent, tablo_adi, item_id=None, firma_id=1, kart_turu=None):
         "stoklar": StokDialog,
         "kasalar": KasaDialog,
         "banka_kurumlari": BankaKurumDialog,
+        "banka_hesaplari": BankaHesapDialog,
         "hizmet_kartlari": HizmetDialog,
         "hizmet_kartlari_gruplari": HizmetKartGrupDialog,
         "stok_kategorileri": GenelTanimDialog,
@@ -510,6 +512,122 @@ class KasaDialog(BaseDialog):
             if conn: conn.rollback()
         finally:
             if conn: conn.close()
+
+class BankaHesapDialog(BaseDialog):
+    def create_widgets(self):
+        form_frame = tk.Frame(self, padx=15, pady=15)
+        form_frame.pack(fill="both", expand=True)
+
+        tk.Label(form_frame, text="Hesap Adı:").grid(row=0, column=0, sticky="w", pady=5)
+        self.ent_hesap_adi = tk.Entry(form_frame, width=40)
+        self.ent_hesap_adi.grid(row=0, column=1, padx=5, pady=5)
+
+        tk.Label(form_frame, text="Banka Kurumu:").grid(row=1, column=0, sticky="w", pady=5)
+        self.lookup_kurum = LookupWidget(form_frame)
+        self.lookup_kurum.grid(row=1, column=1, padx=5, pady=5, sticky="ew")
+        self._kurumlari_yukle()
+
+        tk.Label(form_frame, text="Hesap Türü:").grid(row=2, column=0, sticky="w", pady=5)
+        self.cmb_hesap_turu = ttk.Combobox(form_frame, state="readonly", values=["Vadesiz", "POS", "Kredi Kartı"])
+        self.cmb_hesap_turu.grid(row=2, column=1, padx=5, pady=5, sticky="ew")
+        self.cmb_hesap_turu.set("Vadesiz")
+
+        tk.Label(form_frame, text="IBAN:").grid(row=3, column=0, sticky="w", pady=5)
+        self.ent_iban = tk.Entry(form_frame, width=40)
+        self.ent_iban.grid(row=3, column=1, padx=5, pady=5)
+
+        tk.Label(form_frame, text="Komisyon %:").grid(row=4, column=0, sticky="w", pady=5)
+        self.ent_komisyon = tk.Entry(form_frame, width=40, justify="right")
+        self.ent_komisyon.grid(row=4, column=1, padx=5, pady=5)
+        self.ent_komisyon.insert(0, "0")
+
+        self.ent_hesap_adi.focus_set()
+
+        btn_frame = tk.Frame(self, pady=10)
+        btn_frame.pack(fill="x", padx=15)
+
+        btn_save = tk.Button(btn_frame, text="Kaydet", command=self.on_save, bg="#198754", fg="white", width=12)
+        btn_save.pack(side="right")
+
+        btn_cancel = tk.Button(btn_frame, text="İptal", command=self.destroy, width=12)
+        btn_cancel.pack(side="right", padx=10)
+
+    def _kurumlari_yukle(self):
+        conn = veritabani_baglan()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT kurum_adi, id FROM banka_kurumlari WHERE durum=1 AND firma_id=?",
+            (self.firma_id,),
+        )
+        kurum_dict = {row[0]: row[1] for row in cursor.fetchall()}
+        conn.close()
+        self.lookup_kurum.configure_lookup(
+            title="Banka Kurumu Seç",
+            data_dict=kurum_dict,
+            on_new=lambda: self._yeni_kurum(),
+        )
+
+    def _yeni_kurum(self):
+        sonuc = ac_kart_dialog(self, "banka_kurumlari", firma_id=self.firma_id)
+        if sonuc:
+            self._kurumlari_yukle()
+        return sonuc
+
+    def load_data_for_edit(self):
+        conn = veritabani_baglan()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT hesap_adi, kurum_id, hesap_turu, iban, komisyon_orani FROM banka_hesaplari WHERE id = ?",
+            (self.item_id,),
+        )
+        data = cursor.fetchone()
+        conn.close()
+        if data:
+            hesap_adi, kurum_id, hesap_turu, iban, komisyon_orani = data
+            self.ent_hesap_adi.insert(0, hesap_adi)
+            self.cmb_hesap_turu.set(hesap_turu or "Vadesiz")
+            self.ent_iban.insert(0, iban or "")
+            self.ent_komisyon.delete(0, tk.END)
+            self.ent_komisyon.insert(0, str(komisyon_orani if komisyon_orani is not None else 0))
+            if kurum_id:
+                self.lookup_kurum.set(kurum_id)
+
+    def on_save(self):
+        hesap_adi = self.ent_hesap_adi.get().strip()
+        if not hesap_adi:
+            messagebox.showerror("Hata", "Hesap Adı boş bırakılamaz.", parent=self)
+            return
+
+        hesap_data = {
+            'id': self.item_id,
+            'hesap_adi': hesap_adi,
+            'kurum_id': self.lookup_kurum.get(),
+            'hesap_turu': self.cmb_hesap_turu.get(),
+            'iban': self.ent_iban.get().strip(),
+            'komisyon_orani': parse_currency(self.ent_komisyon.get()),
+            'firma_id': self.firma_id,
+            'durum': 1,
+        }
+
+        conn = None
+        try:
+            conn = veritabani_baglan()
+            cursor = conn.cursor()
+            new_id = kaydet_kart(cursor, "banka_hesaplari", hesap_data)
+            conn.commit()
+
+            self.result = (new_id, hesap_adi)
+            self.destroy()
+
+        except sqlite3.IntegrityError:
+            messagebox.showerror("Hata", f"'{hesap_adi}' adında bir banka hesabı zaten mevcut.", parent=self)
+            if conn: conn.rollback()
+        except Exception as e:
+            messagebox.showerror("Veritabanı Hatası", f"Kayıt sırasında bir hata oluştu: {e}", parent=self)
+            if conn: conn.rollback()
+        finally:
+            if conn: conn.close()
+
 
 class StokDialog(BaseDialog):
     def create_widgets(self):

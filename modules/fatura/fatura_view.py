@@ -4,6 +4,7 @@ from tkcalendar import DateEntry
 from datetime import datetime
 import re # Kaynak modül ayrıştırması için eklendi
 from modules.fatura.fatura_form import FaturaFormu
+from modules.fatura.fatura_fire_form import FaturaFireFormu
 from modules.fatura.fatura_import import (
     fatura_ornek_excel_olustur,
     fatura_excel_oku,
@@ -68,6 +69,8 @@ class FaturaModulu(tk.Frame):
         self.yeni_fis_menu.add_separator()
         self.yeni_fis_menu.add_command(label="Hizmet Satış Faturası", command=lambda: self._ac_yeni_form("Hizmet Satış Faturası"))
         self.yeni_fis_menu.add_command(label="Hizmet Alış Faturası", command=lambda: self._ac_yeni_form("Hizmet Alış Faturası"))
+        self.yeni_fis_menu.add_separator()
+        self.yeni_fis_menu.add_command(label="Fire Fişi", command=lambda: self._ac_yeni_form("Fire Fişi"))
 
         self.btn_duzenle = tk.Button(ust_frame, text="Düzenle", command=self.duzenle, font=("Arial", 9, "bold"), padx=10, pady=4)
         self.btn_duzenle.pack(side="left", padx=(0, 10))
@@ -106,7 +109,7 @@ class FaturaModulu(tk.Frame):
         self.ent_bit_tarih.pack(side="left", padx=(0, 5))
 
         tk.Label(filter_frame, text="Fatura Türü:", bg="#f5f7fb").pack(side="left", padx=(5, 2))
-        self.cmb_tur_filtre = ttk.Combobox(filter_frame, state="readonly", width=20, values=["Tümü", "Satış Faturası", "Alış Faturası", "Satış İade Faturası", "Alış İade Faturası", "Hizmet Satış Faturası", "Hizmet Alış Faturası"])
+        self.cmb_tur_filtre = ttk.Combobox(filter_frame, state="readonly", width=20, values=["Tümü", "Satış Faturası", "Alış Faturası", "Satış İade Faturası", "Alış İade Faturası", "Hizmet Satış Faturası", "Hizmet Alış Faturası", "Fire Fişi"])
         self.cmb_tur_filtre.set("Tümü")
         self.cmb_tur_filtre.bind("<<ComboboxSelected>>", lambda e: self.listele())
         self.cmb_tur_filtre.pack(side="left", padx=(0, 5))
@@ -156,7 +159,7 @@ class FaturaModulu(tk.Frame):
     def listele(self):
         for i in self.tree.get_children(): self.tree.delete(i)
         
-        where_clauses = ["f.firma_id=? AND f.yil=? AND f.fis_turu LIKE '%Faturası'"]
+        where_clauses = ["f.firma_id=? AND f.yil=? AND (f.fis_turu LIKE '%Faturası' OR f.fis_turu = 'Fire Fişi')"]
         params = [self.main_app.aktif_firma_id, self.main_app.aktif_yil]
         
         bas_tarih = self.ent_bas_tarih.get_date().strftime("%Y-%m-%d")
@@ -302,7 +305,10 @@ class FaturaModulu(tk.Frame):
 
     def _ac_yeni_form(self, fis_turu):
         self.pack_forget()
-        self.form_instance = FaturaFormu(self.parent, self.main_app, self, fis_turu=fis_turu, on_close=self.form_kapatildi)
+        if fis_turu == "Fire Fişi":
+            self.form_instance = FaturaFireFormu(self.parent, self.main_app, self, fis_turu=fis_turu, on_close=self.form_kapatildi)
+        else:
+            self.form_instance = FaturaFormu(self.parent, self.main_app, self, fis_turu=fis_turu, on_close=self.form_kapatildi)
         self.form_instance.pack(fill="both", expand=True)
 
     def duzenle(self):
@@ -316,7 +322,10 @@ class FaturaModulu(tk.Frame):
         fis_id = self.tree.item(selected_items[0], "values")[0]
         fis_turu = self.tree.item(selected_items[0], "values")[4] # Fiş türü 4. sütunda
         self.pack_forget()
-        self.form_instance = FaturaFormu(self.parent, self.main_app, self, fis_id=fis_id, fis_turu=fis_turu, on_close=self.form_kapatildi)
+        if fis_turu == "Fire Fişi":
+            self.form_instance = FaturaFireFormu(self.parent, self.main_app, self, fis_id=fis_id, fis_turu=fis_turu, on_close=self.form_kapatildi)
+        else:
+            self.form_instance = FaturaFormu(self.parent, self.main_app, self, fis_id=fis_id, fis_turu=fis_turu, on_close=self.form_kapatildi)
         self.form_instance.pack(fill="both", expand=True)
 
     def sil(self):

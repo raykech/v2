@@ -325,9 +325,11 @@ class CariFisiFormu(tk.Frame):
             self.ent_yon.grid_remove()
 
     def yeni_kart_ekle(self, tablo_adi, kart_turu=None):
-        ac_kart_dialog(self, tablo_adi, firma_id=self.main_app.aktif_firma_id, kart_turu=kart_turu)
-        self.verileri_yukle()
-        self.ayarla_form_yapisi()
+        sonuc = ac_kart_dialog(self, tablo_adi, firma_id=self.main_app.aktif_firma_id, kart_turu=kart_turu)
+        if sonuc:
+            self.verileri_yukle()
+            self.ayarla_form_yapisi()
+        return sonuc
 
     # ---------------------------------------------------------------- Satır işlemleri
     def satir_ekle(self):

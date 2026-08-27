@@ -116,7 +116,7 @@ def cari_ornek_excel_olustur(dosya_yolu):
         # Alacak Dekontu
         ["Alacak Dekontu", "01.01.2026", "AD-001", "Alacak dekontu", "Kira Gideri", "", "Müşteri A", "", "Ocak", 5000],
         # Borç Dekontu
-        ["Borç Dekontu", "02.01.2026", "BD-001", "Borç dekontu", "Faiz Geliri", "", "Tedarikçi B", "", "", 2000],
+        ["Borç Dekontu", "02.01.2026", "BD-001", "Borç dekontu", "İskonto Geliri", "", "Tedarikçi B", "", "", 2000],
         # Cari Ödeme
         ["Cari Ödeme", "03.01.2026", "CO-001", "Ödeme", "TL KASASI", "Kasa", "Tedarikçi B", "", "Fatura", 3000],
         # Cari Tahsilat

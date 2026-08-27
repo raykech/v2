@@ -9,6 +9,10 @@ DB_YOLU = os.path.join(BASE_DIR, "on_muhasebe.db")
 def veritabani_baglan():
     """Veritabanına bağlanır ve bağlantı nesnesini döndürür."""
     conn = sqlite3.connect(DB_YOLU)
+    # Foreign key yürütmeyi aç: ON DELETE CASCADE gibi kuralların çalışması için gerekli.
+    # SQLite'da varsayılan olarak kapalıdır; kapalıyken ana fiş silindiğinde
+    # fis_satirlari satırları yetim (orphan) kalır.
+    conn.execute("PRAGMA foreign_keys = ON")
     return conn
 
 

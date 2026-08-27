@@ -215,8 +215,10 @@ class AcilisFisiFormu(tk.Frame):
         )
 
     def yeni_kart_ekle(self, tablo_adi):
-        ac_kart_dialog(self, tablo_adi, firma_id=self.main_app.aktif_firma_id)
-        self.verileri_yukle()
+        sonuc = ac_kart_dialog(self, tablo_adi, firma_id=self.main_app.aktif_firma_id)
+        if sonuc:
+            self.verileri_yukle()
+        return sonuc
 
     # ---------------------------------------------------------------- Satır işlemleri
     def _fmt(self, fiyat):
