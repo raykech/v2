@@ -6,7 +6,8 @@ import uuid
 from core.db import veritabani_baglan
 from core.services import fis_kaydet, fis_guncelle, kdv_satiri_olustur, aktif_yil_kontrolu
 from utils.formatters import format_currency, parse_currency, CurrencyFormatter, format_miktar, kdv_hesapla
-from ui.widgets.lookup_widget import LookupWidget
+from ui.widgets.lookup_widget import LookupWidget, LookupDialog
+from ui.widgets.editable_treeview import EditableTreeview
 from ui.dialogs import ac_kart_dialog
 
 class FaturaFormu(tk.Frame):
@@ -19,7 +20,6 @@ class FaturaFormu(tk.Frame):
         self.on_close = on_close
         self.is_hizmet_faturasi = "Hizmet" in self.fis_turu
         self.satirlar = {}
-        self.duzenlenen_satir_id = None
         self.cari_dict, self.stok_dict, self.hizmet_dict, self.kasa_dict, self.banka_dict, self.pos_dict = {}, {}, {}, {}, {}, {}
         
         self.create_widgets()
@@ -159,13 +159,28 @@ class FaturaFormu(tk.Frame):
         self.ent_kdv_oran.bind("<Return>", lambda e: self.ent_genel_tutar.focus_set())
         self.ent_genel_tutar.bind("<Return>", lambda e: self.satir_ekle())
 
-        # Satır Listesi
-        self.tree = ttk.Treeview(self.liste_frame, columns=("stok_adi", "aciklama", "miktar", "birim", "birim_fiyat", "kdv_tutar", "toplam_tutar", "sil"), show="headings")
+        # Satır Listesi (satır içi düzenlenebilir)
+        self.tree = EditableTreeview(
+            self.liste_frame,
+            column_config={
+                "stok_adi": {"type": "lookup", "open_dialog": self._satir_stok_dialog_ac},
+                "aciklama": {"type": "text"},
+                "miktar": {"type": "number"},
+                "birim_fiyat": {"type": "number"},
+                "kdv_oran": {"type": "number"},
+                "toplam_tutar": {"type": "number"},
+            },
+            on_edit=self.on_satir_edit,
+            get_edit_value=self._satir_edit_degeri_al,
+            columns=("stok_adi", "aciklama", "miktar", "birim", "birim_fiyat", "kdv_oran", "kdv_tutar", "toplam_tutar", "sil"),
+            show="headings",
+        )
         self.tree.heading("stok_adi", text="Stok Adı")
         self.tree.heading("aciklama", text="Açıklama")
         self.tree.heading("miktar", text="Miktar", anchor="e")
         self.tree.heading("birim", text="Birim")
         self.tree.heading("birim_fiyat", text="Birim Fiyat", anchor="e")
+        self.tree.heading("kdv_oran", text="KDV %", anchor="e")
         self.tree.heading("kdv_tutar", text="KDV Tutarı", anchor="e")
         self.tree.heading("toplam_tutar", text="Toplam Tutar", anchor="e")
         self.tree.heading("sil", text="", anchor="center")
@@ -175,7 +190,6 @@ class FaturaFormu(tk.Frame):
         self.tree.configure(yscrollcommand=vsb.set)
         self.tree.pack(fill="both", expand=True)
 
-        self.tree.bind("<Double-1>", self.satir_duzenle_icin_yukle)
         self.tree.bind("<ButtonRelease-1>", self.on_tree_click)
 
         def _sync_widths(event=None):
@@ -188,6 +202,7 @@ class FaturaFormu(tk.Frame):
                 except (TypeError, IndexError): pass
             self.tree.column("aciklama", anchor="w")
             self.tree.column("birim", width=60, anchor="center", stretch=False)
+            self.tree.column("kdv_oran", width=50, anchor="e", stretch=False)
             self.tree.column("kdv_tutar", width=100, anchor="e", stretch=False)
             self.tree.column("sil", width=30, anchor="center", stretch=False)
         
@@ -512,50 +527,153 @@ class FaturaFormu(tk.Frame):
         if not satir_verisi['aciklama']: 
             satir_verisi['aciklama'] = f"{hesap_adi} - {self.fis_turu}"
 
-        if self.duzenlenen_satir_id:
-            self.satirlar[self.duzenlenen_satir_id] = satir_verisi
-            self.tree.item(self.duzenlenen_satir_id, values=(
-                hesap_adi, aciklama, format_miktar(miktar), birim,
-                format_currency(birim_fiyat), format_currency(kdv_tutar), format_currency(toplam_tutar), "❌"
-            ))
-            self.duzenlenen_satir_id = None
-            self.btn_satir_ekle.config(text="+")
-        else:
-            satir_id = str(uuid.uuid4())
-            self.satirlar[satir_id] = satir_verisi
-            self.tree.insert("", "end", iid=satir_id, values=(
-                hesap_adi, aciklama, format_miktar(miktar), birim,
-                format_currency(birim_fiyat), format_currency(kdv_tutar), format_currency(toplam_tutar), "❌"
-            ))
+        satir_id = str(uuid.uuid4())
+        self.satirlar[satir_id] = satir_verisi
+        self.tree.insert("", "end", iid=satir_id, values=(
+            hesap_adi, aciklama, format_miktar(miktar), birim,
+            format_currency(birim_fiyat), f"{kdv_oran:g}", format_currency(kdv_tutar), format_currency(toplam_tutar), "❌"
+        ))
 
         self.giris_satirini_temizle()
         self.guncelle_toplamlari()
 
-    def satir_duzenle_icin_yukle(self, event):
-        selected_item = self.tree.focus()
-        if not selected_item: return
-        
-        self.duzenlenen_satir_id = selected_item
-        satir_verisi = self.satirlar[selected_item]
+    # --------------------------------------------------------- Satır içi düzenleme
+    def _satir_stok_dialog_ac(self, iid):
+        """Satırın stok/hizmet hücresi için gerçek lookup (ara + yeni kart) diyaloğunu açar."""
+        if self.is_hizmet_faturasi:
+            is_gelir = "Satış" in self.fis_turu
+            data_dict = {k: v['id'] for k, v in self.hizmet_dict.items()
+                         if (is_gelir and v['tur'] == 'Gelir') or (not is_gelir and v['tur'] == 'Gider')}
+            dialog = LookupDialog(
+                self, "Hizmet/Masraf Seç", data_dict,
+                on_new_item=lambda: self.yeni_kart_ekle("hizmet_kartlari", "Gelir" if is_gelir else "Gider"),
+                on_edit_item=None, on_delete_item=None,
+            )
+            self.wait_window(dialog)
+            return dialog.result[1] if dialog.result else None
+        else:
+            data_dict = {k: v['id'] for k, v in self.stok_dict.items()}
+            dialog = LookupDialog(
+                self, "Stok Seç", data_dict,
+                on_new_item=lambda: self.yeni_kart_ekle("stoklar"),
+                on_edit_item=None, on_delete_item=None,
+            )
+            self.wait_window(dialog)
+            return dialog.result[1] if dialog.result else None
 
-        self.ent_stok.set(satir_verisi['hesap_id'])
-        self.ent_satir_aciklama.delete(0, tk.END)
-        self.ent_satir_aciklama.insert(0, satir_verisi.get('aciklama', ''))
-        if not self.is_hizmet_faturasi:
-            self.ent_miktar_formatter.set_value(satir_verisi['miktar'])
-        self.ent_birim_fiyat_formatter.set_value(satir_verisi['birim_fiyat'])
-        self.ent_kdv_oran.delete(0, tk.END)
-        self.ent_kdv_oran.insert(0, str(satir_verisi['kdv_oran']))
-        self.ent_genel_tutar.delete(0, tk.END)
-        self.giris_satiri_hesapla()
-        self.btn_satir_ekle.config(text="✔")
-        self.ent_stok.ent_display.focus_set()
+    def _satir_edit_degeri_al(self, iid, column):
+        """Düzenlemeye açılan hücrenin başlangıç değerini döndürür."""
+        satir = self.satirlar.get(iid)
+        if satir is None:
+            return ""
+        if column == "stok_adi":
+            return satir.get('stok_adi', '')
+        if column == "aciklama":
+            return satir.get('aciklama', '')
+        if column == "miktar":
+            return format_miktar(satir.get('miktar', 1))
+        if column == "birim_fiyat":
+            return format_currency(satir.get('birim_fiyat', 0)).replace(" TL", "")
+        if column == "kdv_oran":
+            return f"{satir.get('kdv_oran', 0):g}"
+        if column == "toplam_tutar":
+            return format_currency(satir.get('toplam_tutar', 0)).replace(" TL", "")
+        return ""
+
+    def _satir_row_guncelle(self, iid, satir):
+        """Bir satırın görünümünü veriye göre yeniler."""
+        if not self.tree.exists(iid):
+            return
+        self.tree.item(iid, values=(
+            satir['stok_adi'], satir.get('aciklama', ''), format_miktar(satir['miktar']), satir.get('birim', ''),
+            format_currency(satir['birim_fiyat']), f"{satir['kdv_oran']:g}",
+            format_currency(satir['kdv_tutar']), format_currency(satir['toplam_tutar']), "❌"
+        ))
+
+    def on_satir_edit(self, iid, column, value):
+        """Satır içi düzenlemeden gelen değeri uygular. Geçerliyse True döner."""
+        satir = self.satirlar.get(iid)
+        if satir is None:
+            return False
+
+        if column == "stok_adi":
+            if self.is_hizmet_faturasi:
+                bilgi = self.hizmet_dict.get(value)
+                if not bilgi:
+                    return False
+                satir['hesap_id'] = bilgi['id']
+                satir['hesap_turu'] = 'Hizmet'
+                kdv = bilgi.get('kdv_oran')
+                if kdv is not None:
+                    satir['kdv_oran'] = kdv
+            else:
+                bilgi = self.stok_dict.get(value)
+                if not bilgi:
+                    return False
+                satir['hesap_id'] = bilgi['id']
+                satir['hesap_turu'] = 'Stok'
+                satir['birim'] = bilgi.get('birim', '')
+                kdv = bilgi.get('kdv_oran')
+                if kdv is not None:
+                    satir['kdv_oran'] = kdv
+            satir['stok_adi'] = value
+        elif column == "aciklama":
+            satir['aciklama'] = value
+        elif column == "toplam_tutar":
+            # KDV dahil toplam girilir; birim fiyat geriye hesaplanır (üst satırdaki akışla aynı)
+            try:
+                val = float(value)
+            except (TypeError, ValueError):
+                return False
+            if val <= 0:
+                messagebox.showwarning("Geçersiz Değer", "Toplam 0'dan büyük olmalıdır.", parent=self)
+                return False
+            payda = satir['miktar'] * (1 + satir['kdv_oran'] / 100)
+            if payda <= 0:
+                return False
+            satir['birim_fiyat'] = val / payda
+        elif column in ("miktar", "birim_fiyat", "kdv_oran"):
+            try:
+                val = float(value)
+            except (TypeError, ValueError):
+                return False
+            if column == "miktar" and val <= 0:
+                messagebox.showwarning("Geçersiz Değer", "Miktar 0'dan büyük olmalıdır.", parent=self)
+                return False
+            if column == "birim_fiyat" and val <= 0:
+                messagebox.showwarning("Geçersiz Değer", "Birim Fiyat 0'dan büyük olmalıdır.", parent=self)
+                return False
+            if column == "kdv_oran" and val < 0:
+                messagebox.showwarning("Geçersiz Değer", "KDV oranı negatif olamaz.", parent=self)
+                return False
+            satir[column] = val
+        else:
+            return False
+
+        # Tutarları yeniden hesapla (2 ondalık, ticari yuvarlama)
+        ara_toplam, kdv_tutar, toplam_tutar = kdv_hesapla(satir['miktar'], satir['birim_fiyat'], satir['kdv_oran'])
+        satir['kdv_tutar'] = kdv_tutar
+        satir['toplam_tutar'] = toplam_tutar
+        # Satır yönüne göre borç/alacak (satir_ekle ile aynı mantık)
+        is_satis = "Satış" in self.fis_turu
+        is_iade = "İade" in self.fis_turu
+        satir_borclu = (is_satis and is_iade) or (not is_satis and not is_iade)
+        if not satir_borclu:
+            satir['borc'] = 0
+            satir['alacak'] = ara_toplam
+        else:
+            satir['borc'] = ara_toplam
+            satir['alacak'] = 0
+
+        self._satir_row_guncelle(iid, satir)
+        self.guncelle_toplamlari()
+        return True
 
     def on_tree_click(self, event):
         region = self.tree.identify("region", event.x, event.y)
         if region == "cell":
             column = self.tree.identify_column(event.x)
-            if column == "#8":
+            if column == "#9":
                 selected_item = self.tree.focus()
                 if selected_item: self.satir_sil(selected_item)
 
@@ -576,13 +694,11 @@ class FaturaFormu(tk.Frame):
         self.ent_genel_tutar.delete(0, tk.END)
         self.giris_satiri_hesapla()
         self.ent_stok.ent_display.focus_set()
-        self.duzenlenen_satir_id = None
-        self.btn_satir_ekle.config(text="+")
 
     def guncelle_toplamlari(self):
-        ara_toplam = sum(s['miktar'] * s['birim_fiyat'] for s in self.satirlar.values())
         kdv_toplam = sum(s['kdv_tutar'] for s in self.satirlar.values())
-        genel_toplam = ara_toplam + kdv_toplam
+        genel_toplam = sum(s['toplam_tutar'] for s in self.satirlar.values())
+        ara_toplam = genel_toplam - kdv_toplam
         self.lbl_ara_toplam.config(text=format_currency(ara_toplam))
         self.lbl_kdv_toplam.config(text=format_currency(kdv_toplam))
         self.lbl_genel_toplam.config(text=format_currency(genel_toplam))
@@ -768,7 +884,8 @@ class FaturaFormu(tk.Frame):
                 }
                 self.tree.insert("", "end", iid=satir_id, values=(
                     satir_dict['hesap_adi'], satir_dict.get('aciklama', ''), format_miktar(satir_dict['miktar']), satir_dict['birim'],
-                    format_currency(satir_dict['birim_fiyat']), format_currency(kdv_tutar), format_currency(toplam_tutar), "❌"
+                    format_currency(satir_dict['birim_fiyat']), f"{satir_dict['kdv_oran']:g}",
+                    format_currency(kdv_tutar), format_currency(toplam_tutar), "❌"
                 ))
             
             cursor.execute("SELECT * FROM fisler WHERE kaynak_fis_id=?", (self.fis_id,))

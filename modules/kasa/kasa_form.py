@@ -5,7 +5,8 @@ from datetime import datetime
 from core.db import veritabani_baglan
 from core.services import fis_kaydet, fis_guncelle, aktif_yil_kontrolu
 from ui.dialogs import ac_kart_dialog
-from ui.widgets.lookup_widget import LookupWidget
+from ui.widgets.lookup_widget import LookupWidget, LookupDialog
+from ui.widgets.editable_treeview import EditableTreeview
 from utils.formatters import CurrencyFormatter, parse_currency, format_miktar, kdv_hesapla
 
 
@@ -17,7 +18,6 @@ class KasaFisiFormu(tk.Frame):
         self.fis_id = fis_id
         self.fis_turu = fis_turu
         self.on_close = on_close
-        self.duzenlenen_satir_id = None
         self.satir_sayaci = 0
 
         self.satirlar = {}
@@ -157,18 +157,29 @@ class KasaFisiFormu(tk.Frame):
         self.entry_row_frame.grid_columnconfigure(5, weight=2, uniform="group1")
         self.entry_row_frame.grid_columnconfigure(6, weight=2, uniform="group1")
 
-        # --- Satır Listesi ---
-        self.tree_satirlar = ttk.Treeview(
+        # --- Satır Listesi (satır içi düzenlenebilir) ---
+        self.tree_satirlar = EditableTreeview(
             self.liste_frame,
-            columns=("hesap_adi", "aciklama", "miktar", "birim_fiyat", "kdv_tutar", "toplam_tutar", "sil"),
+            column_config={
+                "hesap_adi": {"type": "lookup", "open_dialog": self._satir_hesap_dialog_ac},
+                "aciklama": {"type": "text"},
+                "miktar": {"type": "number"},
+                "birim_fiyat": {"type": "number"},
+                "kdv_oran": {"type": "number"},
+                "toplam_tutar": {"type": "number"},
+            },
+            on_edit=self.on_satir_edit,
+            get_edit_value=self._satir_edit_degeri_al,
+            columns=("hesap_adi", "aciklama", "miktar", "birim_fiyat", "kdv_oran", "kdv_tutar", "toplam_tutar", "sil"),
             show="headings"
         )
         self.tree_satirlar.heading("hesap_adi", text="Hesap Adı")
         self.tree_satirlar.heading("aciklama", text="Satır Açıklaması")
         self.tree_satirlar.heading("miktar", text="Miktar")
         self.tree_satirlar.heading("birim_fiyat", text="Birim Fiyat")
+        self.tree_satirlar.heading("kdv_oran", text="KDV %", anchor="e")
         self.tree_satirlar.heading("kdv_tutar", text="KDV T.", anchor="e")
-        self.tree_satirlar.heading("toplam_tutar", text="Genel Toplam")
+        self.tree_satirlar.heading("toplam_tutar", text="Genel Toplam", anchor="e")
         self.tree_satirlar.heading("sil", text="", anchor="center")
 
         vsb = ttk.Scrollbar(self.liste_frame, orient="vertical", command=self.tree_satirlar.yview)
@@ -176,13 +187,12 @@ class KasaFisiFormu(tk.Frame):
         self.tree_satirlar.configure(yscrollcommand=vsb.set)
         self.tree_satirlar.pack(fill="both", expand=True)
 
-        self.tree_satirlar.bind("<Double-1>", self.satir_duzenle_icin_yukle)
         self.tree_satirlar.bind("<ButtonRelease-1>", self.on_tree_click)
 
         def _sync_widths(event=None):
             column_map = {
                 "hesap_adi": 0, "aciklama": 1, "miktar": 2,
-                "birim_fiyat": 3, "kdv_tutar": 4, "toplam_tutar": 6
+                "birim_fiyat": 3, "kdv_oran": 4, "toplam_tutar": 5
             }
             for col_name, i in column_map.items():
                 try:
@@ -191,6 +201,7 @@ class KasaFisiFormu(tk.Frame):
                     self.tree_satirlar.column(col_name, width=width, anchor=anchor)
                 except (TypeError, IndexError):
                     pass
+            self.tree_satirlar.column("kdv_tutar", width=70, anchor="e", stretch=False)
             self.tree_satirlar.column("sil", width=30, anchor="center", stretch=False)
 
         self.entry_row_frame.bind("<Configure>", _sync_widths)
@@ -500,38 +511,17 @@ class KasaFisiFormu(tk.Frame):
             "genel_toplam": genel_toplam
         }
 
-        if self.duzenlenen_satir_id:
-            try:
-                self.satirlar[self.duzenlenen_satir_id] = yeni_satir_verisi
-                self.tree_satirlar.item(
-                    self.duzenlenen_satir_id,
-                    values=(
-                        hesap_adi, aciklama,
-                        format_miktar(miktar), f"{birim_fiyat:,.2f}",
-                        f"{kdv_tutar:,.2f}", f"{genel_toplam:,.2f}", "❌"
-                    )
-                )
-            except Exception as e:
-                print(f"Düzenleme hatası: {e}")
-                item_id = self.tree_satirlar.insert("", "end", values=(
-                    hesap_adi, aciklama,
-                    format_miktar(miktar), f"{birim_fiyat:,.2f}",
-                    f"{kdv_tutar:,.2f}", f"{genel_toplam:,.2f}", "❌"
-                ))
-                self.satirlar[item_id] = yeni_satir_verisi
-            self.duzenlenen_satir_id = None
-        else:
-            self.satir_sayaci += 1
-            item_id = f"satir_{self.satir_sayaci}"
-            self.tree_satirlar.insert(
-                "", "end", iid=item_id,
-                values=(
-                    hesap_adi, aciklama,
-                    format_miktar(miktar), f"{birim_fiyat:,.2f}",
-                    f"{kdv_tutar:,.2f}", f"{genel_toplam:,.2f}", "❌"
-                )
+        self.satir_sayaci += 1
+        item_id = f"satir_{self.satir_sayaci}"
+        self.tree_satirlar.insert(
+            "", "end", iid=item_id,
+            values=(
+                hesap_adi, aciklama,
+                format_miktar(miktar), self._fmt_money(birim_fiyat),
+                f"{kdv_oran:g}", self._fmt_money(kdv_tutar), self._fmt_money(genel_toplam), "❌"
             )
-            self.satirlar[item_id] = yeni_satir_verisi
+        )
+        self.satirlar[item_id] = yeni_satir_verisi
 
         self.temizle_giris_satiri()
 
@@ -546,7 +536,6 @@ class KasaFisiFormu(tk.Frame):
         self.ent_kdv_oran.insert(0, "20")
         self.ent_genel_tutar.delete(0, tk.END)
         self.lookup_hesap.ent_display.focus_set()
-        self.duzenlenen_satir_id = None
         self.guncelle_toplamlari()
 
     def satir_sil(self, item_id_to_delete):
@@ -562,42 +551,131 @@ class KasaFisiFormu(tk.Frame):
 
         self.guncelle_toplamlari()
 
-        if self.duzenlenen_satir_id == item_id_to_delete:
-            self.temizle_giris_satiri()
-
     def on_tree_click(self, event):
         """Treeview'de tıklama olayını işler."""
         region = self.tree_satirlar.identify("region", event.x, event.y)
-        if region == "cell" and self.tree_satirlar.identify_column(event.x) == "#7":
+        if region == "cell" and self.tree_satirlar.identify_column(event.x) == "#8":
             self.satir_sil(self.tree_satirlar.identify_row(event.y))
 
-    def satir_duzenle_icin_yukle(self, event=None):
-        """Çift tıklanan satırı düzenlemek üzere giriş alanlarına yükler."""
-        selected_items = self.tree_satirlar.selection()
-        if not selected_items:
+    # --------------------------------------------------------- Satır içi düzenleme
+    @staticmethod
+    def _fmt_money(deger):
+        """Sayıyı Türkçe para formatına çevirir (örn: 1.234,56)."""
+        return f"{deger:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+
+    def _satir_hesap_dialog_ac(self, iid):
+        """Satırın hesap hücresi için gerçek lookup (ara + yeni kart) diyaloğunu açar."""
+        tur = "Gider" if self.fis_turu == "Kasa Gider Fişi" else "Gelir"
+        data_dict = {k: v['id'] for k, v in self.hizmet_dict.items() if v['tur'] == tur}
+        dialog = LookupDialog(
+            self,
+            f"{tur} Kartı Seç",
+            data_dict,
+            on_new_item=lambda: self._satir_yeni_kart(tur),
+            on_edit_item=None,
+            on_delete_item=None,
+        )
+        self.wait_window(dialog)
+        if dialog.result:
+            return dialog.result[1]  # seçilen kart adı
+        return None
+
+    def _satir_yeni_kart(self, kart_turu):
+        """Satır lookup diyaloğundan yeni kart ekler; (id, ad) döndürür."""
+        sonuc = ac_kart_dialog(self, "hizmet_kartlari", firma_id=self.main_app.aktif_firma_id, kart_turu=kart_turu)
+        if sonuc:
+            self.verileri_yukle()
+        return sonuc
+
+    def _satir_edit_degeri_al(self, iid, column):
+        """Düzenlemeye açılan hücrenin başlangıç değerini döndürür."""
+        satir = self.satirlar.get(iid)
+        if satir is None:
+            return ""
+        if column == "hesap_adi":
+            return satir.get('hesap_adi', '')
+        if column == "aciklama":
+            return satir.get('aciklama', '')
+        if column == "miktar":
+            return format_miktar(satir.get('miktar', 1))
+        if column == "birim_fiyat":
+            return self._fmt_money(satir.get('birim_fiyat', 0))
+        if column == "kdv_oran":
+            return f"{satir.get('kdv_oran', 0):g}"
+        if column == "toplam_tutar":
+            return self._fmt_money(satir.get('genel_toplam', 0))
+        return ""
+
+    def on_satir_edit(self, iid, column, value):
+        """Satır içi düzenlemeden gelen değeri uygular. Geçerliyse True döner."""
+        satir = self.satirlar.get(iid)
+        if satir is None:
+            return False
+
+        if column == "hesap_adi":
+            hesap_bilgisi = self.hizmet_dict.get(value)
+            if not hesap_bilgisi:
+                return False
+            satir['hesap_adi'] = value
+            satir['hesap_id'] = hesap_bilgisi['id']
+            # Hesap değişince kartın varsayılan KDV oranını uygula (ekleme akışıyla aynı)
+            kdv = hesap_bilgisi.get('kdv_oran')
+            if kdv is not None:
+                satir['kdv_oran'] = kdv
+
+        elif column == "aciklama":
+            satir['aciklama'] = value
+
+        elif column == "toplam_tutar":
+            # KDV dahil toplam girilir; birim fiyat geriye hesaplanır (üst satırdaki akışla aynı)
+            try:
+                val = float(value)
+            except (TypeError, ValueError):
+                return False
+            if val <= 0:
+                messagebox.showwarning("Geçersiz Değer", "Toplam 0'dan büyük olmalıdır.", parent=self)
+                return False
+            payda = satir['miktar'] * (1 + satir['kdv_oran'] / 100)
+            if payda <= 0:
+                return False
+            satir['birim_fiyat'] = val / payda
+
+        elif column in ("miktar", "birim_fiyat", "kdv_oran"):
+            try:
+                val = float(value)
+            except (TypeError, ValueError):
+                return False
+            if column == "miktar" and val <= 0:
+                messagebox.showwarning("Geçersiz Değer", "Miktar 0'dan büyük olmalıdır.", parent=self)
+                return False
+            if column == "birim_fiyat" and val <= 0:
+                messagebox.showwarning("Geçersiz Değer", "Birim Fiyat 0'dan büyük olmalıdır.", parent=self)
+                return False
+            if column == "kdv_oran" and val < 0:
+                messagebox.showwarning("Geçersiz Değer", "KDV oranı negatif olamaz.", parent=self)
+                return False
+            satir[column] = val
+        else:
+            return False
+
+        # KDV ve toplamları yeniden hesapla (2 ondalık, ticari yuvarlama)
+        satir['ara_toplam'], satir['kdv_tutar'], satir['genel_toplam'] = kdv_hesapla(
+            satir['miktar'], satir['birim_fiyat'], satir['kdv_oran']
+        )
+        self._satir_row_guncelle(iid, satir)
+        self.guncelle_toplamlari()
+        return True
+
+    def _satir_row_guncelle(self, iid, satir):
+        """Bir satırın görünümünü veriye göre yeniler."""
+        if not self.tree_satirlar.exists(iid):
             return
-
-        selected_item = selected_items[0]
-        try:
-            self.duzenlenen_satir_id = selected_item
-            satir_verisi = self.satirlar[selected_item]
-
-            self.lookup_hesap.set(satir_verisi['hesap_id'])
-            self.ent_satir_aciklama.delete(0, tk.END)
-            self.ent_satir_aciklama.insert(0, satir_verisi['aciklama'])
-            self.ent_miktar.delete(0, tk.END)
-            self.ent_miktar.insert(0, format_miktar(satir_verisi['miktar']))
-            self.ent_birim_fiyat.delete(0, tk.END)
-            self.ent_birim_fiyat.insert(0, f"{satir_verisi['birim_fiyat']:.2f}".replace('.', ','))
-            self.ent_kdv_oran.delete(0, tk.END)
-            self.ent_kdv_oran.insert(0, f"{satir_verisi['kdv_oran']:.2f}".replace('.', ','))
-            self.ent_genel_tutar.delete(0, tk.END)
-            self.hesapla_satir_toplami()
-            self.lookup_hesap.ent_display.focus_set()
-
-        except (IndexError, KeyError) as e:
-            print(f"Satır yükleme hatası: {e}")
-            self.duzenlenen_satir_id = None
+        self.tree_satirlar.item(iid, values=(
+            satir['hesap_adi'], satir['aciklama'],
+            format_miktar(satir['miktar']), self._fmt_money(satir['birim_fiyat']),
+            f"{satir['kdv_oran']:g}",
+            self._fmt_money(satir['kdv_tutar']), self._fmt_money(satir['genel_toplam']), "❌"
+        ))
 
     def guncelle_toplamlari(self):
         """Fişin altındaki genel toplamları günceller."""
@@ -810,8 +888,8 @@ class KasaFisiFormu(tk.Frame):
                             "", "end", iid=item_id,
                             values=(
                                 hesap_adi, satir_data['aciklama'],
-                                format_miktar(miktar), f"{birim_fiyat:,.2f}",
-                                f"{kdv_tutar:,.2f}", f"{genel_toplam:,.2f}", "❌"
+                                format_miktar(miktar), self._fmt_money(birim_fiyat),
+                                f"{kdv_oran:g}", self._fmt_money(kdv_tutar), self._fmt_money(genel_toplam), "❌"
                             )
                         )
                         self.satirlar[item_id] = yeni_satir_verisi

@@ -11,6 +11,7 @@ from core.services import (
 )
 from ui.dialogs import ac_kart_dialog
 from ui.widgets.lookup_widget import LookupWidget
+from ui.widgets.editable_treeview import EditableTreeview
 from utils.formatters import CurrencyFormatter, parse_currency
 
 
@@ -56,7 +57,6 @@ class CekSenetFisiFormu(tk.Frame):
         self.fis_id = fis_id
         self.fis_turu = fis_turu
         self.on_close = on_close
-        self.duzenlenen_satir_id = None
         self.satir_sayaci = 0
         self.tahsil_onceki_durum = None
         self._tahsil_guncel_durum = None
@@ -188,9 +188,15 @@ class CekSenetFisiFormu(tk.Frame):
         self.secim_frame.grid_columnconfigure(0, weight=3)
         self.secim_frame.grid_columnconfigure(1, weight=2)
 
-        # Satır listesi
-        self.tree_satirlar = ttk.Treeview(
+        # Satır listesi (satır içi düzenlenebilir: tutar + açıklama)
+        self.tree_satirlar = EditableTreeview(
             self.liste_frame,
+            column_config={
+                "tutar": {"type": "number"},
+                "aciklama": {"type": "text"},
+            },
+            on_edit=self.on_satir_edit,
+            get_edit_value=self._satir_edit_degeri_al,
             columns=("cek_senet", "tutar", "aciklama", "sil"),
             show="headings",
         )
@@ -209,7 +215,6 @@ class CekSenetFisiFormu(tk.Frame):
         self.tree_satirlar.configure(yscrollcommand=vsb.set)
         self.tree_satirlar.pack(fill="both", expand=True)
 
-        self.tree_satirlar.bind("<Double-1>", self.satir_duzenle_icin_yukle)
         self.tree_satirlar.bind("<ButtonRelease-1>", self.on_tree_click)
 
         # Toplam
@@ -547,30 +552,13 @@ class CekSenetFisiFormu(tk.Frame):
         if self.fis_turu == self.ACILIS_FISI:
             display += f" - {durum}"
 
-        if self.duzenlenen_satir_id:
-            try:
-                self.satirlar[self.duzenlenen_satir_id] = yeni_satir
-                self.tree_satirlar.item(
-                    self.duzenlenen_satir_id,
-                    values=(display, self._fmt(tutar), aciklama, "❌"),
-                )
-            except Exception:
-                self.satir_sayaci += 1
-                item_id = f"satir_{self.satir_sayaci}"
-                self.tree_satirlar.insert(
-                    "", "end", iid=item_id,
-                    values=(display, self._fmt(tutar), aciklama, "❌"),
-                )
-                self.satirlar[item_id] = yeni_satir
-            self.duzenlenen_satir_id = None
-        else:
-            self.satir_sayaci += 1
-            item_id = f"satir_{self.satir_sayaci}"
-            self.tree_satirlar.insert(
-                "", "end", iid=item_id,
-                values=(display, self._fmt(tutar), aciklama, "❌"),
-            )
-            self.satirlar[item_id] = yeni_satir
+        self.satir_sayaci += 1
+        item_id = f"satir_{self.satir_sayaci}"
+        self.tree_satirlar.insert(
+            "", "end", iid=item_id,
+            values=(display, self._fmt(tutar), aciklama, "❌"),
+        )
+        self.satirlar[item_id] = yeni_satir
 
         self.temizle_giris_satiri()
 
@@ -598,40 +586,23 @@ class CekSenetFisiFormu(tk.Frame):
             "seri_no": data["seri_no"],
             "turu": data["turu"],
             "tutar": data["tutar"],
+            "durum": data.get("durum", ""),
             "aciklama": aciklama,
         }
         display = f"{data['seri_no']} - {data['turu']} - {data['durum']}"
 
-        if self.duzenlenen_satir_id:
-            try:
-                self.satirlar[self.duzenlenen_satir_id] = yeni_satir
-                self.tree_satirlar.item(
-                    self.duzenlenen_satir_id,
-                    values=(display, self._fmt(data["tutar"]), aciklama, "❌"),
-                )
-            except Exception:
-                self.satir_sayaci += 1
-                item_id = f"satir_{self.satir_sayaci}"
-                self.tree_satirlar.insert(
-                    "", "end", iid=item_id,
-                    values=(display, self._fmt(data["tutar"]), aciklama, "❌"),
-                )
-                self.satirlar[item_id] = yeni_satir
-            self.duzenlenen_satir_id = None
-        else:
-            self.satir_sayaci += 1
-            item_id = f"satir_{self.satir_sayaci}"
-            self.tree_satirlar.insert(
-                "", "end", iid=item_id,
-                values=(display, self._fmt(data["tutar"]), aciklama, "❌"),
-            )
-            self.satirlar[item_id] = yeni_satir
+        self.satir_sayaci += 1
+        item_id = f"satir_{self.satir_sayaci}"
+        self.tree_satirlar.insert(
+            "", "end", iid=item_id,
+            values=(display, self._fmt(data["tutar"]), aciklama, "❌"),
+        )
+        self.satirlar[item_id] = yeni_satir
 
         self.temizle_giris_satiri()
         self._tahsil_ayarlari_guncelle()
 
     def temizle_giris_satiri(self):
-        self.duzenlenen_satir_id = None
         if self.fis_turu in (self.GIRIS_FISI, self.ACILIS_FISI):
             self.ent_seri_no.delete(0, tk.END)
             self.cmb_tur.set("Çek")
@@ -659,46 +630,66 @@ class CekSenetFisiFormu(tk.Frame):
             print(f"Satır {item_id_to_delete} bulunamadı.")
         self.guncelle_toplamlari()
         self._tahsil_ayarlari_guncelle()
-        if self.duzenlenen_satir_id == item_id_to_delete:
-            self.temizle_giris_satiri()
 
     def on_tree_click(self, event):
         region = self.tree_satirlar.identify("region", event.x, event.y)
         if region == "cell" and self.tree_satirlar.identify_column(event.x) == "#4":
             self.satir_sil(self.tree_satirlar.identify_row(event.y))
 
-    def satir_duzenle_icin_yukle(self, event=None):
-        selected_items = self.tree_satirlar.selection()
-        if not selected_items:
+    # --------------------------------------------------------- Satır içi düzenleme
+    def _satir_edit_degeri_al(self, iid, column):
+        """Düzenlemeye açılan hücrenin başlangıç değerini döndürür."""
+        satir = self.satirlar.get(iid)
+        if satir is None:
+            return ""
+        if column == "aciklama":
+            return satir.get('aciklama', '')
+        if column == "tutar":
+            return self._fmt(satir.get('tutar', 0))
+        return ""
+
+    def on_satir_edit(self, iid, column, value):
+        """Satır içi düzenlemeden gelen değeri uygular. Geçerliyse True döner."""
+        satir = self.satirlar.get(iid)
+        if satir is None:
+            return False
+
+        if column == "aciklama":
+            satir['aciklama'] = value
+        elif column == "tutar":
+            # Yeni (giriş) çek/senet satırlarında tutar değiştirilebilir;
+            # mevcut çek/senette tutar kartın değeridir, değiştirilemez.
+            if satir.get("tip") != "yeni":
+                messagebox.showwarning("Değiştirilemez", "Mevcut çek/senedin tutarı değiştirilemez.", parent=self)
+                return False
+            try:
+                val = float(value)
+            except (TypeError, ValueError):
+                return False
+            if val <= 0:
+                messagebox.showwarning("Geçersiz Tutar", "Tutar 0'dan büyük olmalıdır.", parent=self)
+                return False
+            satir['tutar'] = val
+        else:
+            return False
+
+        self._satir_row_guncelle(iid, satir)
+        self.guncelle_toplamlari()
+        return True
+
+    def _satir_row_guncelle(self, iid, satir):
+        """Bir satırın görünümünü veriye göre yeniler."""
+        if not self.tree_satirlar.exists(iid):
             return
-        selected_item = selected_items[0]
-        try:
-            self.duzenlenen_satir_id = selected_item
-            satir = self.satirlar[selected_item]
-            if satir["tip"] == "yeni":
-                self.ent_seri_no.delete(0, tk.END)
-                self.ent_seri_no.insert(0, satir["seri_no"])
-                self.cmb_tur.set(satir["turu"])
-                if satir.get("banka_id"):
-                    self.lookup_banka_kurum.set(satir["banka_id"])
-                self.ent_vade.set_date(datetime.strptime(satir["vade"], "%Y-%m-%d").date())
-                self.ent_tutar.delete(0, tk.END)
-                self.ent_tutar.insert(0, self._fmt(satir["tutar"]))
-                self.ent_kesideci.delete(0, tk.END)
-                self.ent_kesideci.insert(0, satir.get("kesideci", ""))
-                self.ent_ciranta.delete(0, tk.END)
-                self.ent_ciranta.insert(0, satir.get("ciranta", ""))
-                self.ent_satir_aciklama_giris.delete(0, tk.END)
-                self.ent_satir_aciklama_giris.insert(0, satir.get("aciklama", ""))
-                if self.cmb_acilis_durum and satir.get("durum"):
-                    self.cmb_acilis_durum.set(satir["durum"])
-            else:
-                self.lookup_cek_senet.set(satir["cek_senet_id"])
-                self.ent_satir_aciklama.delete(0, tk.END)
-                self.ent_satir_aciklama.insert(0, satir.get("aciklama", ""))
-        except (IndexError, KeyError, ValueError) as e:
-            print(f"Satır yükleme hatası: {e}")
-            self.duzenlenen_satir_id = None
+        if satir.get("tip") == "yeni":
+            display = f"{satir.get('seri_no','')} - {satir.get('turu','')} - {satir.get('banka_adi','')}"
+            if self.fis_turu == self.ACILIS_FISI:
+                display += f" - {satir.get('durum','')}"
+        else:
+            display = f"{satir.get('seri_no','')} - {satir.get('turu','')} - {satir.get('durum','')}"
+        self.tree_satirlar.item(iid, values=(
+            display, self._fmt(satir.get('tutar', 0)), satir.get('aciklama', ''), "❌"
+        ))
 
     def guncelle_toplamlari(self):
         toplam = sum(s["tutar"] for s in self.satirlar.values())
@@ -1272,6 +1263,7 @@ class CekSenetFisiFormu(tk.Frame):
                         "seri_no": data["seri_no"],
                         "turu": data["turu"],
                         "tutar": data["tutar"],
+                        "durum": data.get("durum", ""),
                         "aciklama": hd.get("aciklama") or "",
                     }
                     self.satir_sayaci += 1

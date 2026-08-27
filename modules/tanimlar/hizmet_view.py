@@ -3,7 +3,7 @@ from tkinter import ttk, messagebox
 import sqlite3
 from utils.formatters import parse_currency
 from core.db import veritabani_baglan
-from core.services import kart_sil as kart_sil_service, kaydet_kart
+from core.services import kart_sil as kart_sil_service, kaydet_kart, is_kart_kullanilmis_mi
 from ui.widgets.lookup_widget import LookupWidget
 from ui.dialogs import ac_kart_dialog
 
@@ -13,6 +13,7 @@ class HizmetTanimView(tk.Frame):
         self.main_app = main_app
         self.parent = parent
         self.selected_id = None
+        self._original_tur = None  # Düzenlenen kartın DB'deki türü (tür değişikliği tespiti için)
         self.grup_dict = {}
         self.create_widgets()
         self._yukle_gruplari()
@@ -137,7 +138,7 @@ class HizmetTanimView(tk.Frame):
         self.cmb_tur_filtre.set("Tümü"); self.cmb_durum_filtre.set("Aktif"); self.ent_arama.delete(0, tk.END); self.listele()
 
     def formu_temizle(self):
-        self.selected_id = None; self.ent_kart_adi.delete(0, tk.END); self.cmb_tur.set("Gider"); self.ent_kdv_oran.delete(0, tk.END); self.ent_kdv_oran.insert(0, "20"); self.cmb_durum.set("Aktif"); self.ent_kart_adi.focus_set()
+        self.selected_id = None; self._original_tur = None; self.ent_kart_adi.delete(0, tk.END); self.cmb_tur.set("Gider"); self.ent_kdv_oran.delete(0, tk.END); self.ent_kdv_oran.insert(0, "20"); self.cmb_durum.set("Aktif"); self.ent_kart_adi.focus_set()
         self._yukle_gruplari(); self._varsayilan_grup_sec()
         if self.tree.selection(): self.tree.selection_remove(self.tree.selection())
 
@@ -168,6 +169,7 @@ class HizmetTanimView(tk.Frame):
         values = self.tree.item(selected_items[0], "values")
         if not values: return
         self.selected_id, kart_adi, tur, grup_adi, kdv_oran, durum_str = values
+        self._original_tur = tur
         self.ent_kart_adi.delete(0, tk.END); self.ent_kart_adi.insert(0, kart_adi)
         self.cmb_tur.set(tur)
         self._yukle_gruplari()
@@ -185,7 +187,28 @@ class HizmetTanimView(tk.Frame):
             messagebox.showerror("Hata", "Lütfen bir grup seçin (zorunlu).", parent=self)
             return
         kdv_oran = parse_currency(self.ent_kdv_oran.get())
-        hizmet_data = {'id': self.selected_id, 'kart_adi': kart_adi, 'tur': self.cmb_tur.get(), 'grup_id': grup_id, 'kdv_oran': kdv_oran, 'durum': 1 if self.cmb_durum.get() == "Aktif" else 0, 'firma_id': self.main_app.aktif_firma_id}
+
+        # Tür değişikliği kilidi: işlem görmüş kartın türü değiştirilemez (mizan dengesi)
+        yeni_tur = self.cmb_tur.get()
+        if self.selected_id and self._original_tur and self._original_tur != yeni_tur:
+            conn_kontrol = None
+            try:
+                conn_kontrol = veritabani_baglan()
+                if is_kart_kullanilmis_mi(conn_kontrol.cursor(), "hizmet_kartlari", self.selected_id, self.main_app.aktif_firma_id):
+                    messagebox.showerror(
+                        "Tür Değiştirilemez",
+                        "Bu kart işlemlerde kullanıldığı için türü değiştirilemez.\n\n"
+                        "Hizmet kartları raporu (mizan), gider kartlarını borç, gelir kartlarını "
+                        "alacak kabul eder. Tür değişikliği bu dengeyi bozar.\n\n"
+                        "İsterseniz aynı isimle yeni bir kart açın; mevcut kayıtlar bu kartta kalsın.",
+                        parent=self,
+                    )
+                    return
+            finally:
+                if conn_kontrol:
+                    conn_kontrol.close()
+
+        hizmet_data = {'id': self.selected_id, 'kart_adi': kart_adi, 'tur': yeni_tur, 'grup_id': grup_id, 'kdv_oran': kdv_oran, 'durum': 1 if self.cmb_durum.get() == "Aktif" else 0, 'firma_id': self.main_app.aktif_firma_id}
         conn = None
         try:
             conn = veritabani_baglan(); cursor = conn.cursor()

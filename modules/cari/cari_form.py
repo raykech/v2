@@ -5,7 +5,8 @@ from datetime import datetime
 from core.db import veritabani_baglan
 from core.services import fis_kaydet, fis_guncelle, aktif_yil_kontrolu
 from ui.dialogs import ac_kart_dialog
-from ui.widgets.lookup_widget import LookupWidget
+from ui.widgets.lookup_widget import LookupWidget, LookupDialog
+from ui.widgets.editable_treeview import EditableTreeview
 from utils.formatters import CurrencyFormatter, parse_currency
 
 
@@ -32,7 +33,6 @@ class CariFisiFormu(tk.Frame):
         self.fis_id = fis_id
         self.fis_turu = fis_turu
         self.on_close = on_close
-        self.duzenlenen_satir_id = None
         self.satir_sayaci = 0
 
         self.satirlar = {}
@@ -146,9 +146,17 @@ class CariFisiFormu(tk.Frame):
         self.ent_satir_aciklama.bind("<Return>", lambda e: self.ent_tutar.focus_set())
         self.ent_tutar.bind("<Return>", lambda e: self.satir_ekle())
 
-        # Satır listesi
-        self.tree_satirlar = ttk.Treeview(
+        # Satır listesi (satır içi düzenlenebilir)
+        self.tree_satirlar = EditableTreeview(
             self.liste_frame,
+            column_config={
+                "hesap_adi": {"type": "lookup", "open_dialog": self._satir_hesap_dialog_ac},
+                "yon": {"type": "combobox", "values": [self.YON_BORC, self.YON_ALACAK]},
+                "aciklama": {"type": "text"},
+                "tutar": {"type": "number"},
+            },
+            on_edit=self.on_satir_edit,
+            get_edit_value=self._satir_edit_degeri_al,
             columns=("hesap_adi", "yon", "aciklama", "tutar", "sil"),
             show="headings",
         )
@@ -163,7 +171,6 @@ class CariFisiFormu(tk.Frame):
         self.tree_satirlar.configure(yscrollcommand=vsb.set)
         self.tree_satirlar.pack(fill="both", expand=True)
 
-        self.tree_satirlar.bind("<Double-1>", self.satir_duzenle_icin_yukle)
         self.tree_satirlar.bind("<ButtonRelease-1>", self.on_tree_click)
 
         toplamlar_frame = tk.Frame(self.liste_frame, bg="#e9ecef")
@@ -348,30 +355,13 @@ class CariFisiFormu(tk.Frame):
             "aciklama": aciklama,
         }
 
-        if self.duzenlenen_satir_id:
-            try:
-                self.satirlar[self.duzenlenen_satir_id] = yeni_satir
-                self.tree_satirlar.item(
-                    self.duzenlenen_satir_id,
-                    values=(hesap_adi, satir_yonu, aciklama, self._fmt(tutar), "❌"),
-                )
-            except Exception:
-                self.satir_sayaci += 1
-                item_id = f"satir_{self.satir_sayaci}"
-                self.tree_satirlar.insert(
-                    "", "end", iid=item_id,
-                    values=(hesap_adi, satir_yonu, aciklama, self._fmt(tutar), "❌"),
-                )
-                self.satirlar[item_id] = yeni_satir
-            self.duzenlenen_satir_id = None
-        else:
-            self.satir_sayaci += 1
-            item_id = f"satir_{self.satir_sayaci}"
-            self.tree_satirlar.insert(
-                "", "end", iid=item_id,
-                values=(hesap_adi, satir_yonu, aciklama, self._fmt(tutar), "❌"),
-            )
-            self.satirlar[item_id] = yeni_satir
+        self.satir_sayaci += 1
+        item_id = f"satir_{self.satir_sayaci}"
+        self.tree_satirlar.insert(
+            "", "end", iid=item_id,
+            values=(hesap_adi, satir_yonu, aciklama, self._fmt(tutar), "❌"),
+        )
+        self.satirlar[item_id] = yeni_satir
 
         self.temizle_giris_satiri()
 
@@ -390,7 +380,6 @@ class CariFisiFormu(tk.Frame):
         self.ent_tutar.delete(0, tk.END)
         self.ent_yon.set(self.YON_BORC)
         self.lookup_hesap.ent_display.focus_set()
-        self.duzenlenen_satir_id = None
         self.guncelle_toplamlari()
 
     def satir_sil(self, item_id_to_delete):
@@ -402,32 +391,91 @@ class CariFisiFormu(tk.Frame):
         except KeyError:
             print(f"Satır {item_id_to_delete} bulunamadı.")
         self.guncelle_toplamlari()
-        if self.duzenlenen_satir_id == item_id_to_delete:
-            self.temizle_giris_satiri()
 
     def on_tree_click(self, event):
         region = self.tree_satirlar.identify("region", event.x, event.y)
         if region == "cell" and self.tree_satirlar.identify_column(event.x) == "#5":
             self.satir_sil(self.tree_satirlar.identify_row(event.y))
 
-    def satir_duzenle_icin_yukle(self, event=None):
-        selected_items = self.tree_satirlar.selection()
-        if not selected_items:
+    # --------------------------------------------------------- Satır içi düzenleme
+    def _satir_hesap_dialog_ac(self, iid):
+        """Satırın hesap hücresi için gerçek lookup (ara + yeni kart) diyaloğunu açar."""
+        dialog = LookupDialog(
+            self,
+            "Cari Seç",
+            self.cari_dict,
+            on_new_item=self._satir_yeni_kart,
+            on_edit_item=None,
+            on_delete_item=None,
+        )
+        self.wait_window(dialog)
+        if dialog.result:
+            return dialog.result[1]  # seçilen cari adı
+        return None
+
+    def _satir_yeni_kart(self):
+        """Satır lookup diyaloğundan yeni cari ekler; (id, ad) döndürür."""
+        sonuc = ac_kart_dialog(self, "cariler", firma_id=self.main_app.aktif_firma_id)
+        if sonuc:
+            self.verileri_yukle()
+        return sonuc
+
+    def _satir_edit_degeri_al(self, iid, column):
+        """Düzenlemeye açılan hücrenin başlangıç değerini döndürür."""
+        satir = self.satirlar.get(iid)
+        if satir is None:
+            return ""
+        if column == "hesap_adi":
+            return satir.get('hesap_adi', '')
+        if column == "yon":
+            return satir.get('yon', '')
+        if column == "aciklama":
+            return satir.get('aciklama', '')
+        if column == "tutar":
+            return self._fmt(satir.get('tutar', 0))
+        return ""
+
+    def on_satir_edit(self, iid, column, value):
+        """Satır içi düzenlemeden gelen değeri uygular. Geçerliyse True döner."""
+        satir = self.satirlar.get(iid)
+        if satir is None:
+            return False
+
+        if column == "hesap_adi":
+            hesap_id = self.cari_dict.get(value)
+            if hesap_id is None:
+                return False
+            satir['hesap_id'] = hesap_id
+            satir['hesap_adi'] = value
+        elif column == "yon":
+            if value not in (self.YON_BORC, self.YON_ALACAK):
+                return False
+            satir['yon'] = value
+        elif column == "aciklama":
+            satir['aciklama'] = value
+        elif column == "tutar":
+            try:
+                val = float(value)
+            except (TypeError, ValueError):
+                return False
+            if val <= 0:
+                messagebox.showwarning("Geçersiz Tutar", "Tutar 0'dan büyük olmalıdır.", parent=self)
+                return False
+            satir['tutar'] = val
+        else:
+            return False
+
+        self._satir_row_guncelle(iid, satir)
+        self.guncelle_toplamlari()
+        return True
+
+    def _satir_row_guncelle(self, iid, satir):
+        """Bir satırın görünümünü veriye göre yeniler."""
+        if not self.tree_satirlar.exists(iid):
             return
-        selected_item = selected_items[0]
-        try:
-            self.duzenlenen_satir_id = selected_item
-            satir = self.satirlar[selected_item]
-            self.lookup_hesap.set(satir['hesap_id'])
-            self.ent_yon.set(satir['yon'])
-            self.ent_satir_aciklama.delete(0, tk.END)
-            self.ent_satir_aciklama.insert(0, satir['aciklama'])
-            self.ent_tutar.delete(0, tk.END)
-            self.ent_tutar.insert(0, f"{satir['tutar']:.2f}".replace(".", ","))
-            self.lookup_hesap.ent_display.focus_set()
-        except (IndexError, KeyError) as e:
-            print(f"Satır yükleme hatası: {e}")
-            self.duzenlenen_satir_id = None
+        self.tree_satirlar.item(iid, values=(
+            satir['hesap_adi'], satir['yon'], satir['aciklama'], self._fmt(satir['tutar']), "❌"
+        ))
 
     def guncelle_toplamlari(self):
         borc = sum(s['tutar'] for s in self.satirlar.values() if s['yon'] == self.YON_BORC)
