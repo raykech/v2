@@ -17,6 +17,8 @@ class HesapEkstresiView(tk.Frame):
         # Hizmet satırlarında tutar = miktar × birim_fiyat olarak hesaplanır
         # (manuel miktar düzeltmelerinin rapora yansıması için)
         self.miktar_bazli = self.hesap_turu == "Hizmet"
+        self._satir_fis_map = {}  # iid -> hedef_id (gösterilen/navigasyon fiş ID'si)
+        self._satir_ham_fis_map = {}  # iid -> orijinal fiş id (kaynak yoksa yedek)
         self.create_widgets()
         self._load_filter_data()
 
@@ -53,7 +55,8 @@ class HesapEkstresiView(tk.Frame):
 
         self.stok_mu = self.hesap_turu == "Stok"
         if self.stok_mu:
-            self.tree = ttk.Treeview(tree_container, columns=("tarih", "fis_no", "fis_turu", "aciklama", "giris_miktar", "giris_tutar", "cikis_miktar", "cikis_tutar", "kalan_miktar", "kalan_maliyet"), show="headings")
+            self.tree = ttk.Treeview(tree_container, columns=("id", "tarih", "fis_no", "fis_turu", "aciklama", "giris_miktar", "giris_tutar", "cikis_miktar", "cikis_tutar", "kalan_miktar", "kalan_maliyet"), show="headings")
+            self.tree.heading("id", text="Fiş ID")
             self.tree.heading("tarih", text="Tarih")
             self.tree.heading("fis_no", text="Fiş No")
             self.tree.heading("fis_turu", text="Fiş Türü")
@@ -64,6 +67,7 @@ class HesapEkstresiView(tk.Frame):
             self.tree.heading("cikis_tutar", text="Çıkış Maliyet", anchor="e")
             self.tree.heading("kalan_miktar", text="Kalan Miktar", anchor="e")
             self.tree.heading("kalan_maliyet", text="Kalan Maliyet", anchor="e")
+            self.tree.column("id", width=60, stretch=False, anchor="center")
             self.tree.column("tarih", width=100, stretch=False, anchor="center")
             self.tree.column("fis_no", width=100, stretch=False)
             self.tree.column("fis_turu", width=180, stretch=False)
@@ -75,7 +79,8 @@ class HesapEkstresiView(tk.Frame):
             self.tree.column("kalan_miktar", width=100, stretch=False, anchor="e")
             self.tree.column("kalan_maliyet", width=120, stretch=False, anchor="e")
         else:
-            self.tree = ttk.Treeview(tree_container, columns=("tarih", "fis_no", "fis_turu", "aciklama", "borc", "alacak", "bakiye"), show="headings")
+            self.tree = ttk.Treeview(tree_container, columns=("id", "tarih", "fis_no", "fis_turu", "aciklama", "borc", "alacak", "bakiye"), show="headings")
+            self.tree.heading("id", text="Fiş ID")
             self.tree.heading("tarih", text="Tarih")
             self.tree.heading("fis_no", text="Fiş No")
             self.tree.heading("fis_turu", text="Fiş Türü")
@@ -83,6 +88,7 @@ class HesapEkstresiView(tk.Frame):
             self.tree.heading("borc", text="Borç", anchor="e")
             self.tree.heading("alacak", text="Alacak", anchor="e")
             self.tree.heading("bakiye", text="Bakiye", anchor="e")
+            self.tree.column("id", width=60, stretch=False, anchor="center")
             self.tree.column("tarih", width=100, stretch=False, anchor="center")
             self.tree.column("fis_no", width=100, stretch=False)
             self.tree.column("fis_turu", width=180, stretch=False)
@@ -101,6 +107,13 @@ class HesapEkstresiView(tk.Frame):
         self.tree.tag_configure('toplam', font=('Arial', 9, 'bold'))
         self.tree.tag_configure('bakiye', font=('Arial', 10, 'bold'), background='#d1e7dd')
         self.tree.tag_configure('separator', background='#cccccc')
+
+        # Sağ tık → ilgili fişe git (Kaynağa Git)
+        self.tree.bind("<Button-3>", self._sag_tik_menu)
+
+        # Sağ tık menüsü
+        self._sag_tik_menu_ui = tk.Menu(self, tearoff=0)
+        self._sag_tik_menu_ui.add_command(label="Kaynağa Git", command=self._sag_tik_kaynak_git)
 
     def _load_filter_data(self):
         tablo_map = {"Cari": "cariler", "Kasa": "kasalar", "Banka": "banka_hesaplari", "Stok": "stoklar", "Hizmet": "hizmet_kartlari"}
@@ -129,6 +142,8 @@ class HesapEkstresiView(tk.Frame):
 
     def listele(self):
         for i in self.tree.get_children(): self.tree.delete(i)
+        self._satir_fis_map.clear()
+        self._satir_ham_fis_map.clear()
         
         secili_hesap_adi = self.lookup_hesap.get_value()
         hesap_id = self.lookup_hesap.get()
@@ -169,7 +184,7 @@ class HesapEkstresiView(tk.Frame):
             devir_bakiye = cursor.fetchone()[0] or 0.0
 
             self.tree.insert("", "end", values=(
-                "", "", "DEVİR", "",
+                "", "", "", "DEVİR", "",
                 format_currency(devir_bakiye) if devir_bakiye > 0 else "",
                 format_currency(-devir_bakiye) if devir_bakiye < 0 else "",
                 format_currency(devir_bakiye)
@@ -178,7 +193,7 @@ class HesapEkstresiView(tk.Frame):
             # 2. Tarih Aralığındaki Hareketleri Çek
             if self.miktar_bazli:
                 cursor.execute("""
-                    SELECT f.tarih, f.fis_no, f.fis_turu, fs.aciklama, fs.borc, fs.alacak, fs.miktar, fs.birim_fiyat
+                    SELECT f.id as fis_id, f.kaynak_fis_id, f.tarih, f.fis_no, f.fis_turu, fs.aciklama, fs.borc, fs.alacak, fs.miktar, fs.birim_fiyat
                     FROM fis_satirlari fs
                     JOIN fisler f ON f.id = fs.fis_id
                     WHERE fs.hesap_turu = ? AND fs.hesap_id = ? AND f.tarih BETWEEN ? AND ? AND fs.firma_id = ?
@@ -186,7 +201,7 @@ class HesapEkstresiView(tk.Frame):
                 """, (self.hesap_turu, hesap_id, bas_tarih, bit_tarih, self.main_app.aktif_firma_id))
             else:
                 cursor.execute("""
-                    SELECT f.tarih, f.fis_no, f.fis_turu, fs.aciklama, fs.borc, fs.alacak
+                    SELECT f.id as fis_id, f.kaynak_fis_id, f.tarih, f.fis_no, f.fis_turu, fs.aciklama, fs.borc, fs.alacak
                     FROM fis_satirlari fs
                     JOIN fisler f ON f.id = fs.fis_id
                     WHERE fs.hesap_turu = ? AND fs.hesap_id = ? AND f.tarih BETWEEN ? AND ? AND fs.firma_id = ?
@@ -201,7 +216,7 @@ class HesapEkstresiView(tk.Frame):
             bakiye = devir_bakiye
             for hareket in hareketler:
                 if self.miktar_bazli:
-                    tarih, fis_no, fis_turu, aciklama, borc, alacak, miktar, birim_fiyat = hareket
+                    fis_id, kaynak_fis_id, tarih, fis_no, fis_turu, aciklama, borc, alacak, miktar, birim_fiyat = hareket
                     # Net tutar = miktar × birim_fiyat; yön kayıtlı borç/alacak'tan gelir
                     miktar = miktar or 0.0
                     birim_fiyat = birim_fiyat or 0.0
@@ -212,9 +227,13 @@ class HesapEkstresiView(tk.Frame):
                     else:
                         borc, alacak = 0.0, 0.0
                 else:
-                    tarih, fis_no, fis_turu, aciklama, borc, alacak = hareket
+                    fis_id, kaynak_fis_id, tarih, fis_no, fis_turu, aciklama, borc, alacak = hareket
                 bakiye += borc - alacak
-                self.tree.insert("", "end", values=(
+                # Gösterilen/navigasyon ID'si: fişin kaynağı varsa kaynak fişin id'si
+                # (örn. peşin ödeme → asıl fatura), yoksa fişin kendi id'si.
+                hedef_id = kaynak_fis_id if kaynak_fis_id else fis_id
+                iid = self.tree.insert("", "end", values=(
+                    hedef_id,
                     format_date(tarih),
                     fis_no,
                     fis_turu,
@@ -223,18 +242,20 @@ class HesapEkstresiView(tk.Frame):
                     format_currency(alacak),
                     format_currency(bakiye)
                 ))
+                self._satir_fis_map[iid] = hedef_id
+                self._satir_ham_fis_map[iid] = fis_id
                 toplam_borc += borc
                 toplam_alacak += alacak
 
             # Alt Toplamlar
-            self.tree.insert("", "end", values=("", "", "", "", "", "", ""), tags=('separator',))
+            self.tree.insert("", "end", values=("", "", "", "", "", "", "", ""), tags=('separator',))
             self.tree.insert("", "end", values=(
-                "", "", "ARA TOPLAM", "",
+                "", "", "", "ARA TOPLAM", "",
                 format_currency(toplam_borc),
                 format_currency(toplam_alacak), ""
             ), tags=('toplam',))
             self.tree.insert("", "end", values=(
-                "", "", "GENEL BAKİYE", "",
+                "", "", "", "GENEL BAKİYE", "",
                 format_currency(bakiye) if bakiye > 0 else "",
                 format_currency(-bakiye) if bakiye < 0 else "",
                 format_currency(bakiye)
@@ -249,7 +270,7 @@ class HesapEkstresiView(tk.Frame):
         """Stok ekstresini FIFO maliyet yöntemiyle listeler (miktar + maliyet)."""
         # Tüm stok hareketlerini tarih sırasıyla çek (devir dahil)
         cursor.execute("""
-            SELECT f.tarih, f.id as fis_id, f.fis_no, f.fis_turu, fs.aciklama,
+            SELECT f.tarih, f.id as fis_id, f.kaynak_fis_id, f.fis_no, f.fis_turu, fs.aciklama,
                    fs.miktar, fs.birim_fiyat, fs.borc, fs.alacak
             FROM fis_satirlari fs
             JOIN fisler f ON f.id = fs.fis_id
@@ -264,7 +285,7 @@ class HesapEkstresiView(tk.Frame):
         kalan_maliyet = 0.0
 
         # Devir (bas_tarih öncesi)
-        for tarih, fis_id, fis_no, fis_turu, aciklama, miktar, birim_fiyat, borc, alacak in hareketler:
+        for tarih, fis_id, kaynak_fis_id, fis_no, fis_turu, aciklama, miktar, birim_fiyat, borc, alacak in hareketler:
             if tarih >= bas_tarih:
                 break
             if borc and borc > 0:
@@ -278,7 +299,7 @@ class HesapEkstresiView(tk.Frame):
 
         # Devir satırı
         self.tree.insert("", "end", values=(
-            "", "", "DEVİR", "",
+            "", "", "", "DEVİR", "",
             "", "", "", "",
             format_miktar(kalan_miktar), format_currency(kalan_maliyet)
         ), tags=('devir',))
@@ -289,7 +310,7 @@ class HesapEkstresiView(tk.Frame):
         toplam_cikis_miktar = 0.0
         toplam_cikis_tutar = 0.0
 
-        for tarih, fis_id, fis_no, fis_turu, aciklama, miktar, birim_fiyat, borc, alacak in hareketler:
+        for tarih, fis_id, kaynak_fis_id, fis_no, fis_turu, aciklama, miktar, birim_fiyat, borc, alacak in hareketler:
             if tarih < bas_tarih:
                 continue
             if tarih > bit_tarih:
@@ -318,23 +339,26 @@ class HesapEkstresiView(tk.Frame):
             toplam_cikis_miktar += cikis_miktar
             toplam_cikis_tutar += cikis_tutar
 
-            self.tree.insert("", "end", values=(
-                format_date(tarih), fis_no, fis_turu, aciklama,
+            hedef_id = kaynak_fis_id if kaynak_fis_id else fis_id
+            iid = self.tree.insert("", "end", values=(
+                hedef_id, format_date(tarih), fis_no, fis_turu, aciklama,
                 format_miktar(giris_miktar), format_currency(giris_tutar),
                 format_miktar(cikis_miktar), format_currency(cikis_tutar),
                 format_miktar(kalan_miktar), format_currency(kalan_maliyet)
             ))
+            self._satir_fis_map[iid] = hedef_id
+            self._satir_ham_fis_map[iid] = fis_id
 
         # Alt toplamlar
-        self.tree.insert("", "end", values=("", "", "", "", "", "", "", "", "", ""), tags=('separator',))
+        self.tree.insert("", "end", values=("", "", "", "", "", "", "", "", "", "", ""), tags=('separator',))
         self.tree.insert("", "end", values=(
-            "", "", "ARA TOPLAM", "",
+            "", "", "", "ARA TOPLAM", "",
             format_miktar(toplam_giris_miktar), format_currency(toplam_giris_tutar),
             format_miktar(toplam_cikis_miktar), format_currency(toplam_cikis_tutar),
             "", ""
         ), tags=('toplam',))
         self.tree.insert("", "end", values=(
-            "", "", "GENEL BAKİYE", "",
+            "", "", "", "GENEL BAKİYE", "",
             "", "", "", "",
             format_miktar(kalan_miktar), format_currency(kalan_maliyet)
         ), tags=('bakiye',))
@@ -362,3 +386,85 @@ class HesapEkstresiView(tk.Frame):
         # Rapor sekmesine geçişte otomatik listeleme YAPILMAZ;
         # yalnızca lookup verisi tazelenir, kullanıcı "Listele" ile yükler.
         self._load_filter_data()
+
+    # ------------------------------------------------- Sağ tık → Kaynağa Git
+    def _sag_tik_menu(self, event):
+        """Sağ tıkta 'Kaynağa Git' menüsünü gösterir (tıklanınca gider)."""
+        rowid = self.tree.identify_row(event.y)
+        if not rowid:
+            return
+        self._sag_tik_rowid = rowid
+        try:
+            self._sag_tik_menu_ui.tk_popup(event.x_root, event.y_root)
+        finally:
+            self._sag_tik_menu_ui.grab_release()
+
+    def _sag_tik_kaynak_git(self):
+        """Menüden 'Kaynağa Git' seçilirse ilgili fişe gider (yıl kontrolüyle)."""
+        rowid = getattr(self, "_sag_tik_rowid", None)
+        if not rowid:
+            return
+        hedef_id = self._satir_fis_map.get(rowid)
+        ham_id = self._satir_ham_fis_map.get(rowid)
+        if not hedef_id:
+            return
+
+        # Hedef fişin bilgilerini bul (yıl kontrolü + modül tayini için)
+        fis_turu, yil = self._fis_bilgi(hedef_id)
+        if fis_turu is None and ham_id and ham_id != hedef_id:
+            # Kaynak fiş bulunamadıysa orijinal fişe düş
+            hedef_id = ham_id
+            fis_turu, yil = self._fis_bilgi(ham_id)
+        if fis_turu is None:
+            messagebox.showwarning("Uyarı", f"Fiş #{hedef_id} bulunamadı.", parent=self)
+            return
+
+        # Aynı yıl kontrolü: aktif yıl dışındaki fişe gidilemez (modül listesi yıl filtreli)
+        if yil != self.main_app.aktif_yil:
+            messagebox.showwarning(
+                "Farklı Yıl",
+                f"Bu fiş {yil} yılına ait; çalışma yılı {self.main_app.aktif_yil}.\n"
+                "Yılı değiştirmek için alt durum çubuğuna tıklayıp yılı seçin, sonra tekrar deneyin.",
+                parent=self,
+            )
+            return
+
+        modul = self._fis_modul_key(fis_turu)
+        if modul and hasattr(self.main_app, "go_to_module_and_select_fis"):
+            self.main_app.go_to_module_and_select_fis(modul, hedef_id)
+
+    def _fis_bilgi(self, fis_id):
+        """Hedef fişin (fis_turu, yil) bilgisini döndürür; yoksa (None, None)."""
+        try:
+            conn = veritabani_baglan()
+            cursor = conn.cursor()
+            cursor.execute("SELECT fis_turu, yil FROM fisler WHERE id=?", (fis_id,))
+            row = cursor.fetchone()
+            conn.close()
+            if row:
+                return row[0], row[1]
+        except Exception:
+            pass
+        return None, None
+
+    def _fis_modul_key(self, fis_turu):
+        """Hedef fişin türüne göre gidilecek modül anahtarını döndürür."""
+        ft = fis_turu or ""
+        if "Çek" in ft or "Senet" in ft:
+            return "cek_senet"
+        if "Faturası" in ft or "Fire" in ft:
+            return "fatura"
+        if "Fatura Peşin" in ft:  # ödeme/tahsilat fişi → ödeme aracına göre
+            return "kasa" if "(Nakit)" in ft else "banka"
+        if "Kasa" in ft:
+            return "kasa"
+        if "Banka" in ft:
+            return "banka"
+        if "Cari" in ft:
+            return "cari"
+        if "Açılış" in ft:
+            if "Kasa" in ft: return "kasa"
+            if "Banka" in ft: return "banka"
+            if "Cari" in ft: return "cari"
+        # Bilinmeyen tür → ekstre türüne göre tahmin
+        return {"Cari": "cari", "Kasa": "kasa", "Banka": "banka", "Stok": "fatura", "Hizmet": "fatura"}.get(self.hesap_turu, "fatura")

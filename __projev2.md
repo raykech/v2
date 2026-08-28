@@ -470,6 +470,8 @@ Tüm raporlar **Excel (.xlsx)** ve **PDF** olarak dışa aktarılabilir (`utils/
 
 **Rapor yükleme davranışı:** Raporlar sekmesine girildiğinde veya sekme değiştirildiğinde **hiçbir rapor otomatik yüklenmez** (kasıntı engeli). Her rapor yalnızca kullanıcı **"Listele" / "Raporu Getir"** butonuna bastığında doldurulur. Ekstre sekmelerinde hesap seçimi **aramalı LookupWidget** ile yapılır (Cari/Stok/Kasa/Banka/Hizmet — listeden yeni kart da eklenebilir).
 
+**Ekstrelerde Fiş ID ve sağ tık → Kaynağa Git:** Tüm ekstre tablolarında (Stok/Cari/Kasa/Banka/Hizmet Detay) her hareket satırının başında **Fiş ID** kolonu bulunur. Gösterilen ID, hareketin geldiği fişin **kaynak fiş** ID'sidir (eğer varsa — örn. peşin ödeme fişi yerine asıl fatura ID'si görünür); kaynak yoksa fişin kendi ID'si yazılır. Bir satıra **sağ tıklanınca → "Kaynağa Git"** menüsü açılır; tıklanırsa ilgili fişin modülüne gidilir ve fiş listede seçilip vurgulanır. Hedef fiş **aktif yıldan farklı bir yıldaysa uyarı verilir** ve gidilmez (önce durum çubuğundan yıl değiştirilmeli).
+
 
 ### 5.8. Ayarlar
 
@@ -514,6 +516,7 @@ yeni firma/yıl ile tazelenir.
   - Kaynağa Git butonu aktifleşir.
 - Örnek: Fatura peşin tahsilatı, `kaynak_modul='Fatura'` olan bir Kasa/Banka fişi oluşturur. Kasa listesinde bu fiş seçildiğinde kullanıcı "Kaynağa Git" ile faturaya dönebilir.
 - `main_app.go_to_module_and_select_fis(module_key, fis_id)` hedef modülü açar, açık formu kapatır ve fişi listede seçip vurgular.
+- **Ekstre raporlarında sağ tık:** Stok/Cari/Kasa/Banka/Hizmet ekstrelerinde bir harekete sağ tıklanınca `go_to_module_and_select_fis` çağrılır ve o fişin olduğu modüle gidilir.
 
 ### 6.5. EditableTreeview (Satır İçi Düzenleme)
 
