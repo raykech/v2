@@ -12,15 +12,21 @@ class CariBakiyeRaporuView(tk.Frame):
         super().__init__(parent, bg="#f5f7fb")
         self.main_app = main_app
         self.create_widgets()
-        self.listele()
 
     def create_widgets(self):
-        # Dışa Aktarma Butonları
+        # Üst Alan: Başlık + filtre + butonlar
         ust_frame = tk.Frame(self, bg="#f5f7fb")
         ust_frame.pack(fill="x", padx=10, pady=10)
 
         tk.Label(ust_frame, text="Cari Bakiyeleri",
                  font=("Arial", 12, "bold"), bg="#f5f7fb").pack(side="left")
+
+        tk.Label(ust_frame, text="   Cari Türü:", bg="#f5f7fb").pack(side="left", padx=(15, 2))
+        self.cmb_tur_filtre = ttk.Combobox(ust_frame, state="readonly", width=14,
+                                           values=["Tümü", "Müşteri", "Tedarikçi", "Diğer"])
+        self.cmb_tur_filtre.set("Tümü")
+        self.cmb_tur_filtre.bind("<<ComboboxSelected>>", lambda e: self.listele())
+        self.cmb_tur_filtre.pack(side="left", padx=(0, 5))
 
         btn_excel = tk.Button(ust_frame, text="Excel'e Aktar",
                               command=lambda: self.disari_aktar('excel'),
@@ -32,10 +38,10 @@ class CariBakiyeRaporuView(tk.Frame):
                             padx=10, pady=4)
         btn_pdf.pack(side="right", padx=(5, 0))
 
-        btn_yenile = tk.Button(ust_frame, text="Yenile",
-                               command=self.listele,
-                               padx=10, pady=4)
-        btn_yenile.pack(side="right", padx=(5, 0))
+        btn_listele = tk.Button(ust_frame, text="Listele",
+                                command=self.listele,
+                                padx=10, pady=4)
+        btn_listele.pack(side="right", padx=(5, 0))
 
         # Liste Alanı
         tree_container = tk.Frame(self)
@@ -88,18 +94,26 @@ class CariBakiyeRaporuView(tk.Frame):
             # Her cari için net bakiye = SUM(borc) - SUM(alacak)
             # Pozitif = cari bize borçlu (bizim alacağımız)
             # Negatif = biz cariye borçlu (bizim borcumuz)
-            c.execute("""
+            # Tür filtresi
+            tur_filtre = self.cmb_tur_filtre.get()
+            where_conditions = "c.firma_id = ? AND (fs.fis_id IS NULL OR f.id IS NOT NULL)"
+            params = [fid, fid]
+            if tur_filtre != "Tümü":
+                where_conditions += " AND c.tur = ?"
+                params.append(tur_filtre)
+
+            c.execute(f"""
                 SELECT c.id, c.unvan, c.tur,
                        COALESCE(SUM(fs.borc),0) - COALESCE(SUM(fs.alacak),0) as net_bakiye
                 FROM cariler c
                 LEFT JOIN fis_satirlari fs
                   ON fs.hesap_turu='Cari' AND fs.hesap_id = c.id AND fs.firma_id = ?
                 LEFT JOIN fisler f ON f.id = fs.fis_id
-                WHERE c.firma_id = ? AND (fs.fis_id IS NULL OR f.id IS NOT NULL)
+                WHERE {where_conditions}
                 GROUP BY c.id
                 HAVING net_bakiye != 0
                 ORDER BY c.unvan
-            """, (fid, fid))
+            """, params)
 
             toplam_borc = 0.0
             toplam_alacak = 0.0
@@ -143,4 +157,5 @@ class CariBakiyeRaporuView(tk.Frame):
         export_treeview_data(self.tree, "Cari Bakiyeleri", format_type)
 
     def yenile(self):
-        self.listele()
+        # Sekme geçişinde otomatik listeleme yok
+        pass

@@ -72,7 +72,7 @@ class CekSenetSeruvenRaporuView(tk.Frame):
         self.cmb_cek['values'] = list(self.cek_dict.keys())
         if self.cmb_cek['values']:
             self.cmb_cek.set(self.cmb_cek['values'][0])
-            self.listele()
+            # Otomatik listeleme YAPILMAZ; kullanıcı seçim yapınca listele tetiklenir
 
     def listele(self):
         for i in self.tree.get_children():

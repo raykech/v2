@@ -6,8 +6,9 @@ from core.db import veritabani_baglan
 from core.services import kart_sil as kart_sil_service, kaydet_kart, is_kart_kullanilmis_mi
 from ui.widgets.lookup_widget import LookupWidget
 from ui.dialogs import ac_kart_dialog
+from ui.widgets.pagination import SayfaliListeMixin
 
-class HizmetTanimView(tk.Frame):
+class HizmetTanimView(SayfaliListeMixin, tk.Frame):
     def __init__(self, parent, main_app):
         super().__init__(parent, bg="#f5f7fb")
         self.main_app = main_app
@@ -96,6 +97,7 @@ class HizmetTanimView(tk.Frame):
         vsb = ttk.Scrollbar(tree_container, orient="vertical", command=self.tree.yview); hsb = ttk.Scrollbar(tree_container, orient="horizontal", command=self.tree.xview)
         self.tree.configure(yscrollcommand=vsb.set, xscrollcommand=hsb.set); vsb.pack(side="right", fill="y"); hsb.pack(side="bottom", fill="x"); self.tree.pack(side="left", fill="both", expand=True)
         self.tree.bind("<<TreeviewSelect>>", self.kayit_secildi); self.tree.tag_configure('passive', foreground='gray')
+        self._init_sayfalama(self.tree)
 
     def _tur_degisti(self):
         """Kartın türü değişince grubu türe göre yeniden yükle."""
@@ -144,24 +146,25 @@ class HizmetTanimView(tk.Frame):
 
     def listele(self):
         for i in self.tree.get_children(): self.tree.delete(i)
+        self._sayfa_yuklenen = 0
+        self._sayfa_tukendi = False
         where_clauses = ["firma_id=?"]; params = [self.main_app.aktif_firma_id]
         if self.cmb_tur_filtre.get() != "Tümü": where_clauses.append("tur = ?"); params.append(self.cmb_tur_filtre.get())
         if self.cmb_durum_filtre.get() != "Tümü": where_clauses.append("durum = ?"); params.append(1 if self.cmb_durum_filtre.get() == "Aktif" else 0)
         if self.ent_arama.get().strip(): where_clauses.append("kart_adi LIKE ?"); params.append(f"%{self.ent_arama.get().strip()}%")
-        try:
-            conn = veritabani_baglan(); cursor = conn.cursor()
-            # NOT: WHERE koşulları hizmet_kartlari tablosunu işaret etmeli
-            # (grup tablosunda da firma_id/tur/durum sütunları olduğu için belirsizlik olmasın)
-            query = """SELECT h.id, h.kart_adi, h.tur, COALESCE(g.grup_adi, ''), h.durum, h.kdv_oran
-                       FROM hizmet_kartlari h
-                       LEFT JOIN hizmet_kartlari_gruplari g ON g.id = h.grup_id
-                       WHERE h.""" + " AND h.".join(where_clauses) + " ORDER BY h.id DESC"
-            cursor.execute(query, params)
-            for row in cursor.fetchall():
-                durum_str = "Aktif" if row[4] == 1 else "Pasif"; tags = ('passive',) if row[4] == 0 else (); kdv_oran = row[5] or 0
-                self.tree.insert("", "end", values=(row[0], row[1], row[2], row[3], f"{kdv_oran:g}", durum_str), tags=tags)
-            conn.close()
-        except Exception as e: messagebox.showerror("Hata", f"Hizmet kartları listelenemedi: {e}", parent=self)
+        # NOT: WHERE koşulları hizmet_kartlari tablosunu işaret etmeli
+        # (grup tablosunda da firma_id/tur/durum sütunları olduğu için belirsizlik olmasın)
+        self._sayfa_query = """SELECT h.id, h.kart_adi, h.tur, COALESCE(g.grup_adi, ''), h.durum, h.kdv_oran
+                               FROM hizmet_kartlari h
+                               LEFT JOIN hizmet_kartlari_gruplari g ON g.id = h.grup_id
+                               WHERE h.""" + " AND h.".join(where_clauses) + " ORDER BY h.id DESC"
+        self._sayfa_params = params
+        self._diger_sayfa_yukle()
+
+    def _satirlari_ekle(self, rows):
+        for row in rows:
+            durum_str = "Aktif" if row[4] == 1 else "Pasif"; tags = ('passive',) if row[4] == 0 else (); kdv_oran = row[5] or 0
+            self.tree.insert("", "end", values=(row[0], row[1], row[2], row[3], f"{kdv_oran:g}", durum_str), tags=tags)
 
     def kayit_secildi(self, event=None):
         selected_items = self.tree.selection()

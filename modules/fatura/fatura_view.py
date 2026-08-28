@@ -16,8 +16,9 @@ from core.db import veritabani_baglan
 from ui.widgets.tooltip import Tooltip # Tooltip için eklendi
 from utils.formatters import format_date, format_currency
 from core.services import fis_sil as fis_sil_service
+from ui.widgets.pagination import SayfaliListeMixin
 
-class FaturaModulu(tk.Frame):
+class FaturaModulu(SayfaliListeMixin, tk.Frame):
     def __init__(self, parent, main_app):
         super().__init__(parent, bg="#f5f7fb")
         self.main_app = main_app
@@ -139,6 +140,7 @@ class FaturaModulu(tk.Frame):
 
     def _load_filter_data(self):
         self.tree.bind("<<TreeviewSelect>>", self._on_tree_select)
+        self._init_sayfalama(self.tree)
         self._update_action_buttons_state() # Başlangıçta buton durumlarını ayarla
 
         try:
@@ -158,10 +160,12 @@ class FaturaModulu(tk.Frame):
 
     def listele(self):
         for i in self.tree.get_children(): self.tree.delete(i)
-        
+        self._sayfa_yuklenen = 0
+        self._sayfa_tukendi = False
+
         where_clauses = ["f.firma_id=? AND f.yil=? AND (f.fis_turu LIKE '%Faturası' OR f.fis_turu = 'Fire Fişi')"]
         params = [self.main_app.aktif_firma_id, self.main_app.aktif_yil]
-        
+
         bas_tarih = self.ent_bas_tarih.get_date().strftime("%Y-%m-%d")
         bit_tarih = self.ent_bit_tarih.get_date().strftime("%Y-%m-%d")
         # Tarih aralığını aktif yılın sınırlarına göre kısıtla
@@ -183,24 +187,23 @@ class FaturaModulu(tk.Frame):
             where_clauses.append("(f.fis_no LIKE ? OR f.aciklama LIKE ?)")
             params.extend([f"%{self.ent_arama.get().strip()}%", f"%{self.ent_arama.get().strip()}%"])
 
-        try:
-            conn = veritabani_baglan()
-            cursor = conn.cursor()
-            query = """
-                SELECT f.id, f.tarih, f.fis_no, f.kaynak_modul, f.kaynak_fis_id, f.fis_turu, c.unvan, f.aciklama, f.toplam_tutar 
-                FROM fisler f 
-                LEFT JOIN cariler c ON f.cari_id = c.id
-            """
-            if where_clauses: query += " WHERE " + " AND ".join(where_clauses)
-            query += " ORDER BY f.id DESC"
-            cursor.execute(query, params)
-            for fis in cursor.fetchall():
-                fis_id, tarih, fis_no, kaynak_modul, _, fis_turu, cari_unvan, aciklama, toplam_tutar = fis
-                kaynak_str = kaynak_modul or ""
-                self.tree.insert("", "end", values=(fis_id, format_date(tarih), fis_no or '', kaynak_str, fis_turu, cari_unvan or '', aciklama or '', format_currency(toplam_tutar)))
-            conn.close()
-        except Exception as e:
-            messagebox.showerror("Veri Yükleme Hatası", f"Faturalar yüklenemedi: {e}", parent=self)
+        query = """
+            SELECT f.id, f.tarih, f.fis_no, f.kaynak_modul, f.kaynak_fis_id, f.fis_turu, c.unvan, f.aciklama, f.toplam_tutar
+            FROM fisler f
+            LEFT JOIN cariler c ON f.cari_id = c.id
+        """
+        if where_clauses: query += " WHERE " + " AND ".join(where_clauses)
+        query += " ORDER BY f.id DESC"
+
+        self._sayfa_query = query
+        self._sayfa_params = params
+        self._diger_sayfa_yukle()
+
+    def _satirlari_ekle(self, rows):
+        for fis in rows:
+            fis_id, tarih, fis_no, kaynak_modul, _, fis_turu, cari_unvan, aciklama, toplam_tutar = fis
+            kaynak_str = kaynak_modul or ""
+            self.tree.insert("", "end", values=(fis_id, format_date(tarih), fis_no or '', kaynak_str, fis_turu, cari_unvan or '', aciklama or '', format_currency(toplam_tutar)))
 
     def filtreleri_temizle(self):
         self.cmb_cari_filtre.set("Tüm Cariler")
@@ -428,21 +431,32 @@ class FaturaModulu(tk.Frame):
     def select_and_highlight_fis(self, fis_id):
         """Belirtilen fişi Treeview'de seçer ve görünür hale getirir."""
         self.filtreleri_temizle() # Önce filtreleri temizle
-        secilen = None
-        for item in self.tree.get_children():
-            if int(self.tree.item(item, "values")[0]) == int(fis_id):
-                secilen = item
-                break
+        secilen = self._tree_de_fis_ara(fis_id)
         if secilen is None:
             # Tarih aralığı hedef fişi kapsamıyorsa aralığı genişletip tekrar ara
             self.ent_bas_tarih.set_date(datetime(self.main_app.aktif_yil - 1, 1, 1))
             self.ent_bit_tarih.set_date(datetime(self.main_app.aktif_yil + 1, 12, 31))
             self.listele()
-            for item in self.tree.get_children():
-                if int(self.tree.item(item, "values")[0]) == int(fis_id):
-                    secilen = item
-                    break
+            secilen = self._tree_de_fis_ara(fis_id)
+        if secilen is None:
+            # Sayfalama: hedef fiş ilk yüklenen sayfada yoksa tüm kayıtları yükle
+            self._sayfa_tukendi = False
+            while not self._sayfa_tukendi:
+                onceki = self._sayfa_yuklenen
+                self._diger_sayfa_yukle()
+                if self._sayfa_yuklenen == onceki and not self._sayfa_tukendi:
+                    self._sayfa_tukendi = True  # ilerleme yoksa durdur
+            secilen = self._tree_de_fis_ara(fis_id)
         if secilen is not None:
             self.tree.selection_set(secilen)
             self.tree.see(secilen)
             self._on_tree_select(None) # Buton durumlarını da güncelle
+
+    def _tree_de_fis_ara(self, fis_id):
+        for item in self.tree.get_children():
+            try:
+                if int(self.tree.item(item, "values")[0]) == int(fis_id):
+                    return item
+            except (TypeError, ValueError):
+                continue
+        return None

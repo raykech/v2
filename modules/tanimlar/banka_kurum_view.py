@@ -3,8 +3,9 @@ from tkinter import ttk, messagebox
 import sqlite3
 from core.db import veritabani_baglan
 from core.services import kart_sil as kart_sil_service, kaydet_kart
+from ui.widgets.pagination import SayfaliListeMixin
 
-class BankaKurumTanimView(tk.Frame):
+class BankaKurumTanimView(SayfaliListeMixin, tk.Frame):
     def __init__(self, parent, main_app):
         super().__init__(parent, bg="#f5f7fb")
         self.main_app = main_app
@@ -69,6 +70,7 @@ class BankaKurumTanimView(tk.Frame):
         vsb = ttk.Scrollbar(tree_container, orient="vertical", command=self.tree.yview); hsb = ttk.Scrollbar(tree_container, orient="horizontal", command=self.tree.xview)
         self.tree.configure(yscrollcommand=vsb.set, xscrollcommand=hsb.set); vsb.pack(side="right", fill="y"); hsb.pack(side="bottom", fill="x"); self.tree.pack(side="left", fill="both", expand=True)
         self.tree.bind("<<TreeviewSelect>>", self.kayit_secildi); self.tree.tag_configure('passive', foreground='gray')
+        self._init_sayfalama(self.tree)
 
     def filtreleri_temizle(self):
         self.cmb_durum_filtre.set("Aktif"); self.ent_arama.delete(0, tk.END); self.listele()
@@ -79,18 +81,19 @@ class BankaKurumTanimView(tk.Frame):
 
     def listele(self):
         for i in self.tree.get_children(): self.tree.delete(i)
+        self._sayfa_yuklenen = 0
+        self._sayfa_tukendi = False
         where_clauses = ["firma_id=?"]; params = [self.main_app.aktif_firma_id]
         if self.cmb_durum_filtre.get() != "Tümü": where_clauses.append("durum = ?"); params.append(1 if self.cmb_durum_filtre.get() == "Aktif" else 0)
         if self.ent_arama.get().strip(): where_clauses.append("kurum_adi LIKE ?"); params.append(f"%{self.ent_arama.get().strip()}%")
-        try:
-            conn = veritabani_baglan(); cursor = conn.cursor()
-            query = "SELECT id, kurum_adi, durum FROM banka_kurumlari WHERE " + " AND ".join(where_clauses) + " ORDER BY id DESC"
-            cursor.execute(query, params)
-            for row in cursor.fetchall():
-                durum_str = "Aktif" if row[2] == 1 else "Pasif"; tags = ('passive',) if row[2] == 0 else ()
-                self.tree.insert("", "end", values=(row[0], row[1], durum_str), tags=tags)
-            conn.close()
-        except Exception as e: messagebox.showerror("Hata", f"Banka kurumları listelenemedi: {e}", parent=self)
+        self._sayfa_query = "SELECT id, kurum_adi, durum FROM banka_kurumlari WHERE " + " AND ".join(where_clauses) + " ORDER BY id DESC"
+        self._sayfa_params = params
+        self._diger_sayfa_yukle()
+
+    def _satirlari_ekle(self, rows):
+        for row in rows:
+            durum_str = "Aktif" if row[2] == 1 else "Pasif"; tags = ('passive',) if row[2] == 0 else ()
+            self.tree.insert("", "end", values=(row[0], row[1], durum_str), tags=tags)
 
     def kayit_secildi(self, event=None):
         selected_items = self.tree.selection()

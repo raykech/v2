@@ -87,17 +87,22 @@ class HizmetKartlariRaporuView(tk.Frame):
             cursor = conn.cursor()
 
             # Hizmet kartı bazında borç/alacak toplamları (grup bilgisiyle)
+            # NOT: Tutarlar fis_satirlari.borc/alacak yerine miktar * birim_fiyat'tan
+            # hesaplanır, böylece miktar manuel düzeltildiğinde rapor da güncellenir.
+            # Tarih filtresi LEFT JOIN içinde EXISTS ile uygulanır (bkz. hata düzeltmesi).
             cursor.execute(
                 """
                 SELECT h.id, h.kart_adi, h.tur, h.grup_id, COALESCE(g.grup_adi, 'Diğer'),
-                       COALESCE(SUM(fs.borc), 0), COALESCE(SUM(fs.alacak), 0)
+                       COALESCE(SUM(CASE WHEN fs.borc > 0 THEN fs.miktar * fs.birim_fiyat ELSE 0 END), 0),
+                       COALESCE(SUM(CASE WHEN fs.alacak > 0 THEN fs.miktar * fs.birim_fiyat ELSE 0 END), 0)
                 FROM hizmet_kartlari h
                 LEFT JOIN hizmet_kartlari_gruplari g ON g.id = h.grup_id
                 LEFT JOIN fis_satirlari fs ON fs.hesap_turu = 'Hizmet' AND fs.hesap_id = h.id AND fs.firma_id = ?
-                LEFT JOIN fisler f ON f.id = fs.fis_id AND f.tarih BETWEEN ? AND ?
+                   AND fs.fis_id IN (SELECT f2.id FROM fisler f2 WHERE f2.tarih BETWEEN ? AND ?)
                 WHERE h.firma_id = ?
                 GROUP BY h.id, h.kart_adi, h.tur, h.grup_id, g.grup_adi
-                HAVING SUM(fs.borc) != 0 OR SUM(fs.alacak) != 0
+                HAVING SUM(CASE WHEN fs.borc > 0 THEN fs.miktar * fs.birim_fiyat ELSE 0 END) != 0
+                    OR SUM(CASE WHEN fs.alacak > 0 THEN fs.miktar * fs.birim_fiyat ELSE 0 END) != 0
                 ORDER BY h.tur, g.grup_adi, h.kart_adi
                 """,
                 (self.main_app.aktif_firma_id, bas_tarih, bit_tarih, self.main_app.aktif_firma_id),
@@ -203,4 +208,5 @@ class HizmetKartlariRaporuView(tk.Frame):
         export_treeview_data(self.tree, "Hizmet Kartları Raporu", format_type)
 
     def yenile(self):
-        self.listele()
+        # Sekme geçişinde otomatik listeleme yok
+        pass

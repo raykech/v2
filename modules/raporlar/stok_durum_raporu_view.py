@@ -151,5 +151,6 @@ class StokDurumRaporuView(tk.Frame):
         export_treeview_data(self.tree, "Stok Durum Raporu", format_type)
 
     def yenile(self):
+        # Sekme geçişinde otomatik listeleme yok (kasıntı engeli);
+        # yalnızca kategori filtresi tazelenir, kullanıcı "Listele" ile yükler.
         self._load_filter_data()
-        self.listele()

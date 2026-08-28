@@ -53,6 +53,6 @@ class RaporlarModulu(tk.Frame):
         self.notebook.add(self.satis_raporu_tab, text="Satış Raporu")
 
     def yenile(self):
-        selected_widget = self.notebook.nametowidget(self.notebook.select())
-        if hasattr(selected_widget, 'yenile'):
-            selected_widget.yenile()
+        # Raporlar sekmesine geçişte otomatik yükleme YAPILMAZ (kasıntı engeli);
+        # her rapor yalnızca kullanıcı "Listele / Raporu Getir" dediğinde yüklenir.
+        pass

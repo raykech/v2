@@ -140,10 +140,10 @@ def fatura_ornek_excel_olustur(dosya_yolu):
             "Alış Faturası", "02.01.2026", "AF-001", "Ocak alışı", "Tedarikçi B",
             "Banka", "Banka Hesabı 1", "Ürün 2", "", 5, 50, 20, "",
         ],
-        # Hizmet satış faturası örneği
+        # Hizmet satış faturası örneği (miktar × birim fiyat)
         [
             "Hizmet Satış Faturası", "03.01.2026", "HS-001", "Hizmet satışı", "Müşteri A",
-            "Nakit", "Ana Kasa", "Danışmanlık", "", "", 1000, 20, "",
+            "Nakit", "Ana Kasa", "Danışmanlık", "", 2, 1000, 20, "",
         ],
     ]
 
@@ -192,7 +192,7 @@ def fatura_ornek_excel_olustur(dosya_yolu):
         ("1. 'Fatura İşlemleri' sayfasındaki örnek satırları kendi verilerinizle değiştirin.", False),
         ("2. Her satır bir fatura satırıdır. Aynı Fatura No'ya sahip satırlar tek fatura olarak gruplanır.", False),
         ("3. Fatura No boş bırakılırsa her Excel satırı ayrı bir fatura olarak içe aktarılır.", False),
-        ("4. Stoklu faturalarda Miktar + Birim Fiyat, hizmet faturalarında Birim Fiyat/Tutar kullanılır.", False),
+        ("4. Tüm faturalarda (stoklu ve hizmetli) Miktar + Birim Fiyat kullanılır; Birim Fiyat boşsa Tutar / Miktar ile hesaplanır.", False),
         ("5. KDV % boş bırakılırsa 0 kabul edilir.", False),
         ("6. Vadeli faturalarda Cari zorunludur, Ödeme Hesabı boş olur.", False),
         ("7. Nakit/Banka/POS faturalarında Ödeme Hesabı zorunludur.", False),
@@ -417,19 +417,17 @@ def fatura_import_dogrula(satirlar, firma_id, aktif_yil):
             if kdv_oran is None:
                 kdv_oran = 0.0
 
-            if is_hizmet:
+            # Miktar × Birim Fiyat mantığı stok ve hizmet faturalarında aynıdır:
+            # - Miktar boşsa 1 kabul edilir
+            # - Birim Fiyat boşsa ve Tutar varsa birim fiyat = Tutar / Miktar hesaplanır
+            if miktar is None:
                 miktar = 1.0
-                if birim_fiyat is None and tutar is not None:
-                    birim_fiyat = tutar
-            else:
-                if miktar is None:
-                    miktar = 1.0
-                if birim_fiyat is None and tutar is not None:
-                    if miktar and miktar > 0:
-                        birim_fiyat = tutar / miktar
-                    else:
-                        hatalar.append(f"Satır {row_no}: Miktar 0 olduğu için birim fiyat hesaplanamadı.")
-                        continue
+            if birim_fiyat is None and tutar is not None:
+                if miktar and miktar > 0:
+                    birim_fiyat = tutar / miktar
+                else:
+                    hatalar.append(f"Satır {row_no}: Miktar 0 olduğu için birim fiyat hesaplanamadı.")
+                    continue
 
             if birim_fiyat is None:
                 hatalar.append(f"Satır {row_no}: Birim Fiyat veya Tutar girilmelidir.")

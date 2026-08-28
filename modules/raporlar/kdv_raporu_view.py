@@ -206,5 +206,5 @@ class KdvRaporuView(tk.Frame):
         export_treeview_data(self.tree, "KDV Raporu", format_type)
 
     def yenile(self):
+        # Sekme geçişinde otomatik listeleme yok; yalnızca KDV hesap adları tazelenir
         self._load_kdv_hesaplari()
-        self.listele()

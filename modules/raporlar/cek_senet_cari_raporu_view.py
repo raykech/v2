@@ -12,7 +12,6 @@ class CekSenetCariRaporuView(tk.Frame):
         super().__init__(parent, bg="#f5f7fb")
         self.main_app = main_app
         self.create_widgets()
-        self.listele()
 
     def create_widgets(self):
         filter_frame = tk.LabelFrame(self, text="Filtrele", bg="#f5f7fb", padx=10, pady=10)
@@ -124,4 +123,5 @@ class CekSenetCariRaporuView(tk.Frame):
         export_treeview_data(self.tree, "Cari Bazlı Çek/Senet Özeti", format_type)
 
     def yenile(self):
-        self.listele()
+        # Sekme geçişinde otomatik listeleme yok
+        pass

@@ -17,7 +17,7 @@ v2 mimarisinde tüm işlemler **çok satırlı fiş** modeli üzerine kurulmuşt
 - Modüler yapı: Her modül `view` (liste) ve `form` (giriş/düzenleme) olarak ayrılır.
 - Katman ayrımı: Veritabanı (`core/db.py`), iş mantığı (`core/services.py`), arayüz (`ui/`, `modules/`).
 - Kaynak takibi: Bir modülde oluşturulan fiş, başka modülde oluşturulmuş bir fişe bağlanabilir.
-- Kullanıcı deneyimi: Excel benzeri satır girişi, dinamik formlar, LookupWidget ile hızlı seçim.
+- Kullanıcı deneyimi: Excel benzeri satır girişi (satır içi düzenleme), dinamik formlar, LookupWidget ile hızlı seçim.
 
 ---
 
@@ -29,6 +29,8 @@ core/
   db.py                     SQLite bağlantısı ve şema kurulumu
   services.py               Ortak fiş/kart servisleri + çek/senet yardımcıları
 modules/
+  giris/
+    dashboard_view.py       Giriş sekmesi: 6 özet kart (Kasa, Banka Vadesiz, POS, Cari Alacak/Borç, Stok FIFO)
   kasa/
     kasa_view.py            Kasa modülü liste görünümü
     kasa_form.py            Kasa fiş formu (Gider/Gelir/Virman)
@@ -44,6 +46,7 @@ modules/
   fatura/
     fatura_view.py          Fatura modülü liste görünümü
     fatura_form.py          Fatura fiş formu
+    fatura_fire_form.py     Fire Fişi formu (stok çıkışı → gider kartı)
     fatura_import.py        Fatura Excel import yardımcıları
   cek_senet/
     cek_senet_view.py       Çek/Senet modülü liste görünümü
@@ -60,21 +63,42 @@ modules/
     banka_kurum_view.py     Banka kurum tanımı
     banka_hesap_view.py     Banka hesap tanımı
     tanim_import.py         Tanım kartları (Cari, Stok, Hizmet, Kasa, Banka) Excel import
-  raporlar/                 Raporlar (hesap ekstreleri, stok raporları, KDV Raporu)
+  raporlar/
+    raporlar_view.py        Raporlar ana görünümü (Notebook sekmeleri)
+    hesap_ekstresi_view.py  Hesap ekstresi (Stok/Cari/Kasa/Banka/Hizmet — FIFO destekli)
+    stok_durum_raporu_view.py  Stok Durum Raporu
+    hizmet_kartlari_raporu_view.py  Hizmet kartları mizan raporu
     kdv_raporu_view.py      KDV Raporu (191 İndirilecek / 391 Hesaplanan)
-  ayarlar/                  Ayarlar (firma, yıl)
+    cari_bakiye_raporu_view.py  Cari Bakiyeleri raporu
+    satis_raporu_view.py    Aylık Satış Raporu (kâr/zarar, FIFO maliyet)
+    cek_senet_raporlari_view.py  Çek/Senet raporları ana sekmesi (iç Notebook)
+    cek_senet_portfoy_raporu_view.py   Portföy (güncel durum)
+    cek_senet_vade_raporu_view.py      Vade Takvimi (vade dilimleri)
+    cek_senet_seruven_raporu_view.py   Serüven (seçili çek/senedin hareketleri)
+    cek_senet_cari_raporu_view.py      Cari Bazlı Özet
+  ayarlar/
+    ayarlar_view.py         Ayarlar ana görünümü (Notebook sekmeleri)
+    firma_tanimlari_view.py Firma tanımları (ekle/düzenle/listele)
+    yil_tanimlari_view.py   Yıl tanımları (genel_tanimlar 'Yillar' grubu)
 ui/
   main_window.py            Ana pencere, sekmeler, F5 ile yeniden yükleme
-  dialogs.py                Yeni kart ekleme/düzenleme diyalogları
+  dialogs.py                Yeni kart ekleme/düzenleme diyalogları + FirmaYilDialog
   import_preview.py         Import önizleme dialog sınıfları (Kasa, Fatura, Banka, Cari, Çek/Senet, Tanım)
   widgets/
     lookup_widget.py        Arama ve seçim bileşeni
     advanced_treeview.py    Gelişmiş filtreli/sıralamalı Treeview bileşeni
+    editable_treeview.py    Excel tarzı satır içi düzenleme bileşeni
+    pagination.py           Aşağı kaydıkça yükleyen (infinite scroll) liste mixin'i
     tooltip.py              Tooltip bileşeni
 utils/
-  formatters.py             Para/tarih formatlama
+  formatters.py             Para/tarih formatlama, KDV hesabı (Decimal + ROUND_HALF_UP)
   export.py                 Excel / PDF dışa aktarma
+docs/laravel/               Gelecekteki Laravel + Vue + Inertia web geçiş planı (bağımsız dokümanlar)
+__importlar/                Excel import deneme/örnek dosyaları (çalışma zamanı dışı)
 ```
+
+> Not: `modules/raporlar/stok_raporu_view.py` eski bir dosyadır ve raporlar
+> notebook'una bağlı değildir; yeni rapor yapısı `raporlar_view.py` üzerinden kurulmuştur.
 
 ---
 
@@ -91,8 +115,8 @@ utils/
   - `tur='KDV'` olan kartlar KDV hesaplarıdır: **191 İndirilecek KDV**, **391 Hesaplanan KDV**
   - Bu kartlar "KDV" grubu altında (`hizmet_kartlari_gruplari.grup_adi='KDV'`) otomatik oluşturulur
   - KDV kartları fiş satırlarında kullanılır ancak normal hizmet kartı lookuplarında gösterilmez (tür filtresi nedeniyle)
-- **hizmet_kartlari_gruplari**: `id`, `grup_adi`, `tur`, `firma_id`, `durum`
-- **genel_tanimlar**: `id`, `grup`, `deger`, `firma_id` (stok kategorisi, stok birimi gibi değerler için)
+- **hizmet_kartlari_gruplari**: `id`, `grup_adi`, `tur`, `firma_id`, `durum` — her firma için varsayılan "Diğer" (Gider/Gelir) ve "KDV" grupları şema kurulumunda oluşturulur
+- **genel_tanimlar**: `id`, `grup`, `deger`, `firma_id` — stok kategorisi/birimi gibi değerlerin yanında **"Yillar"** grubuyla çalışma yılı tanımlarını da tutar
 
 ### 3.2. Fiş Modeli
 
@@ -103,7 +127,7 @@ utils/
 | `id` | Birincil anahtar |
 | `tarih` | İşlem tarihi |
 | `fis_turu` | Fiş türü |
-| `fis_no` | Evrak/fiş numarası |
+| `fis_no` | Evrak/fiş numarası (aynı firma + yıl + tarih içinde benzersiz olmalıdır) |
 | `aciklama` | Genel açıklama |
 | `cari_id` | Faturanın ana carisi gibi opsiyonel başlık carisi |
 | `kaynak_modul` | Fişin hangi modülde oluşturulduğu |
@@ -118,21 +142,23 @@ utils/
 | Kolon | Açıklama |
 |---|---|
 | `id` | Birincil anahtar |
-| `fis_id` | `fisler.id` referansı |
+| `fis_id` | `fisler.id` referansı (ON DELETE CASCADE) |
 | `hesap_turu` | `Stok`, `Hizmet`, `Cari`, `Kasa`, `Banka`, `CekSenet` |
 | `hesap_id` | İlgili tanım kartının ID'si |
 | `aciklama` | Satır açıklaması |
 | `miktar` | Miktar |
 | `birim_fiyat` | Birim fiyat |
 | `borc` / `alacak` | Borç ve alacak tutarları |
-| `kdv_oran` / `kdv_tutar` | KDV bilgileri |
+| `kdv_oran` | KDV oranı (KDV tutarı satırda tutulmaz; ayrı KDV satırı üretilir) |
 | `firma_id` | Firma |
+
+**Performans indeksleri:** `fis_satirlari (hesap_turu, hesap_id, firma_id)` ve `fisler (firma_id, tarih)` üzerinde otomatik oluşturulur.
 
 ### 3.3. Çek/Senet Modeli
 
 **cekler_senetler**
 
-- `id`, `seri_no`, `turu` (`Çek`/`Senet`), `banka`, `banka_id`, `vade_tarihi`, `tutar`
+- `id`, `seri_no` (benzersiz), `turu` (`Çek`/`Senet`), `banka`, `banka_id`, `vade_tarihi`, `tutar`
 - `firma_id`, `created_at`, `updated_at`
 - `kesideci`, `ciranta`, `aciklama`
 
@@ -144,17 +170,22 @@ utils/
 
 ### 3.4. Firma
 
-- **firmalar**: `id`, `firma_adi`, `durum`
+- **firmalar**: `id`, `firma_adi`, `durum` — varsayılan "Ana Firma (Varsayılan)" şema kurulumunda oluşturulur
 
 ---
 
 ## 4. Ortak İş Mantığı (`core/services.py`)
 
-- `fis_kaydet(...)` – Yeni fiş + satırlar + opsiyonel peşin ödeme fişi kaydeder.
+- `fis_no_kontrol(...)` – Fiş numarasının aynı firma + yıl içinde benzersizliğini kontrol eder
+  (tarih verilirse aynı tarih içinde tekrar da engellenir; boş numaraya izin verilir).
+- `fis_kaydet(...)` – Yeni fiş + satırlar + opsiyonel peşin ödeme fişi kaydeder. Kayıttan önce `fis_no_kontrol` yapılır.
 - `fis_guncelle(...)` – Fişi ve satırlarını günceller, eski peşin ödeme fişini siler. (`yil` UPDATE'te de set edilir)
 - `fis_sil(...)` – Fişi ve bağlı satırları siler.
 - `kaydet_kart(...)` / `kart_sil(...)` – Tanım kartlarını ekler/günceller/siler.
 - `is_kart_kullanilmis_mi(...)` – Kartın fişlerde kullanılıp kullanılmadığını kontrol eder.
+- **Güvenlik (SQL enjeksiyon whitelist):** `GECERLI_KART_TABLOLARI` sözlüğü; `kart_sil`,
+  `kaydet_kart` ve `is_kart_kullanilmis_mi` fonksiyonları tablo adını bu whitelist'ten
+  geçirmeden çalışmaz — izin verilmeyen tablo adı reddedilir.
 - **KDV yardımcıları:**
   - `kdv_hesap_idleri(cursor, firma_id)` – Firmanın 191/391 KDV hesap ID'lerini döndürür `(indirilecek, hesaplanan)`.
   - `kdv_satiri_olustur(kdv_hesap_id, kdv_tutar, yon, aciklama)` – KDV için ayrı fiş satırı üretir (`yon`: `'borc'` → 191, `'alacak'` → 391).
@@ -166,6 +197,11 @@ utils/
   - `cek_senet_fis_son_hareket_mi`
   - `cek_senet_hareket_ekle`
   - `cek_senet_fis_sil`
+
+**Para/KDV yuvarlama (`utils/formatters.py`):**
+- `kdv_hesapla(...)` Decimal + `ROUND_HALF_UP` ile **2 ondalık ticari yuvarlama** yapar;
+  Kasa/Banka/Fatura formları ve import'lar bu fonksiyonu kullanır — kuruş farkları ve
+  float artıkları (örn. `0.18000000000000002`) oluşmaz.
 
 ---
 
@@ -197,16 +233,33 @@ borç toplamı = alacak toplamı şeklinde dengede kalmasını sağlar.
 **Notlar:**
 - Peşin faturalarda KDV, ana fatura fişinde üretilir; ödeme fişi brüt tutarı taşır (birlikte denge).
 - **Banka gider/gelir fişleri KDV'sizdir** — KDV alanı ve hesaplaması banka formunda yoktur, `KDV %` sütunu importta yok sayılır.
+- **Fire Fişi de KDV'sizdir** — satırlarda KDV yoktur; stok çıkışı (alacak) karşılığında Gider kartı borçlanır.
 - Excel importta **"Tutar" sütunu her zaman nettir** (KDV hariç); KDV satırı sistem tarafından üretilir.
 
 **Akıllı giriş (Tutar KDV Dahil):**
 - Kasa ve Fatura formlarında giriş satırındaki **"Tutar (KDV Dahil)"** alanı doldurulursa
   birim fiyat otomatik hesaplanır: `birim_fiyat = tutar / (miktar × (1 + KDV%/100))`.
 - Bu alan doluysa satır eklerken birim fiyat yerine bu tutar esas alınır.
+- Ayrıca KDV % kolonu satır bazında düzenlenebilir; hesap değişince kartın KDV'si otomatik uygulanır.
 
 ---
 
 ## 5. Modüller ve Özellikler
+
+### 5.0. Giriş (Genel Durum Dashboard)
+
+Uygulama açıldığında giriş sekmesi **6 özet kart** gösterir (3 sütun × 2 satır):
+
+| Kart | İçerik |
+|---|---|
+| Kasa Toplam Bakiye | Tüm kasaların `Σ(borç) − Σ(alacak)` |
+| Banka Toplam Bakiye | Yalnız **Vadesiz** türü banka hesapları |
+| POS Toplam Alacak | `hesap_turu='POS'` banka hesaplarının bakiyesi |
+| Toplam Alacak | Bize borçlu olan carilerin toplamı |
+| Toplam Borç | Bizim cariye borcumuzun toplamı |
+| Eldeki Stok Maliyet (FIFO) | Stok bakiyesi × FIFO giriş maliyeti (stok raporundaki mantıkla aynı) |
+
+Sekmeye her geçişte otomatik yenilenir (`yenile()`).
 
 ### 5.1. Kasa
 
@@ -222,6 +275,7 @@ Fiş türleri:
 - KDV otomatik dolum ve anında satır toplamı hesabı
 - **KDV ayrı satır**: Gider/Gelir fişlerinde KDV, net satırla aynı yönde 191/391 hesabına ayrı satır olarak yazılır (fiş dengelenir)
 - **Akıllı giriş**: "Tutar (KDV Dahil)" alanından birim fiyat otomatik hesaplanır
+- **Satır içi düzenleme**: `EditableTreeview` ile hücreye çift tık → yerinde düzenleme (hesap, açıklama, miktar, birim fiyat, KDV %)
 
 **Excel İçe Aktarma (`kasa_import.py`)**
 - Template sayfası: "Kasa İşlemleri" + "Açıklama"
@@ -250,6 +304,7 @@ Fiş türleri:
 - Bankaya Yatan / Bankadan Çekilen işlemlerinde karşı hesap Kasa'dır
 - Gelen/Giden Transfer işlemlerinde karşı hesap Cari'dir
 - **Banka gider/gelir fişleri KDV'sizdir** (KDV alanı yoktur; importta `KDV %` sütunu yok sayılır)
+- **Satır içi düzenleme**: `EditableTreeview` (hesap/açıklama/miktar/birim fiyat)
 
 **Excel İçe Aktarma (`banka_import.py`)**
 - Template sayfası: "Banka İşlemleri" + "Açıklama"
@@ -272,6 +327,7 @@ Fiş türleri:
 - Alacak/Borç Dekontu: üstte tek Gider/Gelir kartı, satırlarda Cariler
 - Cari Ödeme/Tahsilat: ödeme türü Kasa veya Banka
 - Cari Virman: satır bazlı borç/alacak, toplam borç = toplam alacak zorunluluğu
+- **Satır içi düzenleme**: `EditableTreeview` (hesap lookup + Borç/Alacak yönü + açıklama + tutar)
 
 **Excel İçe Aktarma (`cari_import.py`)**
 - Template sayfası: "Cari İşlemleri" + "Açıklama"
@@ -290,6 +346,7 @@ Fiş türleri:
 - Alış İade Faturası
 - Hizmet Satış Faturası
 - Hizmet Alış Faturası
+- **Fire Fişi** (KDV'siz stok fire kaydı)
 
 Ödeme tipleri:
 - Vadeli
@@ -304,13 +361,20 @@ Fiş türleri:
 - KDV otomatik dolum ve satır toplamı hesabı
 - **KDV ayrı satır**: fatura satırı net, KDV 191/391 hesabına ayrı satır olarak yazılır; cari karşılığı brüt → fiş dengelenir
 - **Akıllı giriş**: "Tutar (KDV Dahil)" alanından birim fiyat otomatik hesaplanır
+- **Satır içi düzenleme**: `EditableTreeview` (stok/hizmet lookup + açıklama + miktar + birim fiyat + KDV % + toplam ters hesap)
 - Peşin ödeme yönü: Satış (iade değil) ve Alış İade → **Tahsilat**; Alış (iade değil) ve Satış İade → **Ödeme**
+
+**Fire Fişi (`fatura_fire_form.py`):**
+- Stok satırları **alacak** (stok çıkışı), üstte seçilen **Fire Gider Kartı** (Hizmet, Gider türü) toplam tutar kadar **borç**lanır → fiş dengelenir.
+- KDV'sizdir; satırlarda KDV hesaplanmaz.
+- `kaynak_modul='Fatura'` ile kaydedilir; Fatura modülünün "Yeni ▼" menüsünden ve tür filtresinden erişilir.
+- Düzenleme modunda stok satırları + gider kartı geri yüklenir.
 
 **Excel İçe Aktarma (`fatura_import.py`)**
 - Template sayfası: "Fatura İşlemleri" + "Açıklama"
 - Sütunlar: Fiş Türü, Tarih, Fatura No, Açıklama, Cari, Ödeme Tipi, Ödeme Hesabı, Stok/Hizmet Adı, Satır Açıklaması, Miktar, Birim Fiyat, KDV %, Tutar
 - Vadeli faturalarda Cari zorunludur; Nakit/Banka/POS faturalarında Ödeme Hesabı zorunludur.
-- Hizmet faturalarında Miktar kullanılmaz (otomatik 1).
+- **Miktar × Birim Fiyat, stok ve hizmet faturalarında aynı şekilde uygulanır** (Miktar boşsa 1 kabul edilir; Birim Fiyat boşsa Tutar / Miktar ile hesaplanır).
 - **Tutar sütunu nettir** (KDV hariç); KDV ayrı satır olarak otomatik üretilir.
 
 ### 5.5. Çek/Senet
@@ -346,6 +410,7 @@ Kurallar:
 - Diğer fişler yalnızca uygun durumdaki çek/senetleri seçebilir.
 - Tahsil fişinde tüm satırlar aynı durumda olmalıdır.
 - Bir fiş, ilgili çek/senedin son hareketi değilse düzenlenemez/silinemez.
+- Satır içi düzenleme: "Çek/Senet" kolonu bileşik görüntü olduğundan **sadece tutar (yeni tip) ve açıklama** hücre içinde düzenlenebilir; çek/senet seçimi sil + üstten yeniden ekleme ile değiştirilir.
 
 **Excel İçe Aktarma (`cek_senet_import.py`)**
 - Şu an yalnızca **Çek/Senet Giriş Fişi** ve **Çek/Senet Açılış Fişi** desteklenir.
@@ -371,6 +436,11 @@ Tanımlar sekmeler arası geçişte otomatik yenilenir.
 > şeması kurulurken (`core/db.py`) otomatik oluşturulur; elle silinmemeli/düzenlenmemelidir
 > (fiş satırlarında kullanıldıkları için kullanımda olan kart silinemez).
 
+**Hizmet kartı türü kilidi:** İşlem görmüş (fişlerde kullanılmış) bir hizmet kartının
+**Tür'ü (Gider/Gelir) değiştirilemez** — hizmet kartları raporu bir mizandır; tür değişikliği
+geçmiş kayıtları yanlış bölüme taşır. Yanlış kart açıldıysa yeni kart açılması veya ileride
+"Hesap Taşı" özelliğinin kullanılması önerilir.
+
 **Excel İçe Aktarma (`tanim_import.py`)**
 - "Excel Yükle" sekmesinden erişilir.
 - Tek Excel dosyasında 6 sayfa: Cari Kartlar, Stok Kartları, Hizmet Kartları, Kasa Kartları, Banka Kurumları, Banka Hesapları
@@ -380,17 +450,36 @@ Tanımlar sekmeler arası geçişte otomatik yenilenir.
 
 ### 5.7. Raporlar
 
-Rapor sekmeleri:
-- Stok Durum Raporu
-- Stok Ekstresi
-- Cari Ekstre
-- Kasa Ekstre
-- Banka Ekstre
-- Hizmet Kartları Raporu
-- Hizmet Kartları Detay
-- **KDV Raporu** – 191 İndirilecek / 391 Hesaplanan hareketlerini tarih aralığıyla listeler; aylık alt toplamlar, genel toplamlar ve **"Ödenecek/Devreden KDV (391 − 191)"** farkını gösterir
+Raporlar notebook'undaki sekmeler:
 
-Raporlar **Excel (.xlsx)** ve **PDF** olarak dışa aktarılabilir.
+| Sekme | Dosya | İçerik |
+|---|---|---|
+| Stok Durum Raporu | `stok_durum_raporu_view.py` | Stok kartları; kategori/durum/arama filtreli, kalan miktar + maliyet |
+| Stok Ekstresi | `hesap_ekstresi_view.py` (hesap_turu='Stok') | FIFO maliyet yöntemiyle giriş/çıkış/kalan miktar + maliyet |
+| Cari Ekstre | `hesap_ekstresi_view.py` (Cari) | Cari hareketleri + bakiye |
+| Kasa Ekstre | `hesap_ekstresi_view.py` (Kasa) | Kasa hareketleri + bakiye |
+| Banka Ekstre | `hesap_ekstresi_view.py` (Banka) | Banka hareketleri + bakiye |
+| Hizmet Kartları Raporu | `hizmet_kartlari_raporu_view.py` | Mizan: GELİRLER üstte, GİDERLER altta, gruplar altında kartlar; **tarih aralığına uyar** ve tutarlar **miktar × birim fiyat**tan hesaplanır |
+| Hizmet Kartları Detay | `hesap_ekstresi_view.py` (Hizmet) | Hizmet kartı hareket detayı; satır tutarları **miktar × birim fiyat**tan hesaplanır |
+| Çek/Senet Raporları | `cek_senet_raporlari_view.py` | İç notebook: **Portföy** (güncel durum), **Vade Takvimi** (vade dilimleri), **Serüven** (seçili çek/senedin hareketleri), **Cari Bazlı Özet** |
+| KDV Raporu | `kdv_raporu_view.py` | 191 İndirilecek / 391 Hesaplanan hareketleri; tarih aralığı, aylık alt toplamlar, genel toplamlar ve **"Ödenecek/Devreden KDV (391 − 191)"** farkı |
+| Cari Bakiyeleri | `cari_bakiye_raporu_view.py` | Tüm carilerin güncel borç/alacak bakiyeleri + **Cari Türü (Müşteri/Tedarikçi/Diğer) filtresi** + toplamlar |
+| Satış Raporu | `satis_raporu_view.py` | Aylık: satış rakamı, hizmet gelirleri (miktar×birim), FIFO maliyet (COGS), giderler, **KÂR/ZARAR** |
+
+Tüm raporlar **Excel (.xlsx)** ve **PDF** olarak dışa aktarılabilir (`utils/export.py` → `export_treeview_data`).
+
+**Rapor yükleme davranışı:** Raporlar sekmesine girildiğinde veya sekme değiştirildiğinde **hiçbir rapor otomatik yüklenmez** (kasıntı engeli). Her rapor yalnızca kullanıcı **"Listele" / "Raporu Getir"** butonuna bastığında doldurulur. Ekstre sekmelerinde hesap seçimi **aramalı LookupWidget** ile yapılır (Cari/Stok/Kasa/Banka/Hizmet — listeden yeni kart da eklenebilir).
+
+
+### 5.8. Ayarlar
+
+Ayarlar notebook'u iki sekmeden oluşur:
+- **Firma Tanımları** (`firma_tanimlari_view.py`): Firma ekleme/düzenleme, durum (Aktif/Pasif), arama filtresi.
+- **Yıl Tanımları** (`yil_tanimlari_view.py`): `genel_tanimlar` tablosunun **"Yillar"** grubuna yıl ekleme/kaldırma; eklenen yıllar firma/yıl seçim ekranının yıl listesinde görünür.
+
+Ayrıca ana pencerenin durum çubuğuna tıklanınca açılan **FirmaYilDialog** (`ui/dialogs.py`) ile
+çalışma sırasında firma ve yıl değiştirilebilir; değişiklikte açık sekmeler kapatılıp modüller
+yeni firma/yıl ile tazelenir.
 
 ---
 
@@ -398,10 +487,12 @@ Raporlar **Excel (.xlsx)** ve **PDF** olarak dışa aktarılabilir.
 
 ### 6.1. Ana Pencere
 
-- Firma ve yıl seçimi ile giriş yapılır.
-- Modüller sekmeler hâlinde açılır.
+- Firma ve yıl seçimi ile giriş yapılır; ardından **Giriş (Genel Durum)** sekmesi açılır.
+- Modüller sekmeler hâlinde açılır; sekmeler **sürüklenerek yeniden sıralanabilir** (Giriş sekmesi sabittir, en başta kalır), `x` ile kapatılabilir.
 - Sekmeler arası geçişte aktif modül otomatik yenilenir.
+- Durum çubuğu firma/yıl bilgisini gösterir; tıklanınca firma/yıl değiştirme diyaloğu açılır.
 - Geliştirme sırasında **F5** ile aktif modül ve bağımlılıkları yeniden yüklenir.
+- Modüller üst menüden ("Modüller") ve üst buton panelinden açılır.
 
 ### 6.2. LookupWidget
 
@@ -422,6 +513,30 @@ Raporlar **Excel (.xlsx)** ve **PDF** olarak dışa aktarılabilir.
   - Düzenle ve Sil butonları pasif olur.
   - Kaynağa Git butonu aktifleşir.
 - Örnek: Fatura peşin tahsilatı, `kaynak_modul='Fatura'` olan bir Kasa/Banka fişi oluşturur. Kasa listesinde bu fiş seçildiğinde kullanıcı "Kaynağa Git" ile faturaya dönebilir.
+- `main_app.go_to_module_and_select_fis(module_key, fis_id)` hedef modülü açar, açık formu kapatır ve fişi listede seçip vurgular.
+
+### 6.5. EditableTreeview (Satır İçi Düzenleme)
+
+`ui/widgets/editable_treeview.py` — Excel tarzı, yeniden kullanılabilir satır içi düzenleme bileşeni:
+- `column_config`: her düzenlenebilir kolon için `type` (`text` / `number` / `lookup` / `combobox`) tanımlanır.
+- Hücreye çift tık → yerinde düzenleme; lookup hücrelerinde `...` butonu ile diyalog (sadece buton/Enter ile açılır).
+- Enter → aynı satır içinde sağa ilerler (alt satıra geçmez); Esc → iptal; odak kaybı → onaylar.
+- Düzenlenen satır hafif vurgu (`#fff3cd`); tam satır mavisi seçim yok (`selectmode="none"`).
+- `on_edit(iid, kolon_id, deger)` → `True` dönerse düzenleme kabul edilir.
+- Kasa, Banka, Cari, Fatura, Çek/Senet ve Açılış formları bu bileşeni kullanır.
+
+### 6.6. Sayfalama (Infinite Scroll)
+
+`ui/widgets/pagination.py` → `SayfaliListeMixin` — Treeview listeleri için **aşağı kaydıkça yükleme**:
+- `listele()` yalnızca ilk `SAYFA_BOYUTU` (200) kaydı çeker; kullanıcı listenin alt %15'ine
+  indikçe bir sonraki sayfa (`LIMIT ... OFFSET ...`) otomatik yüklenir.
+- Kullanım: sınıf `SayfaliListeMixin`'i miras alır, `create_widgets` içinde `_init_sayfalama(tree)`
+  çağrılır; `listele` sorguyu `_sayfa_query`/`_sayfa_params`'a yazar ve `_diger_sayfa_yukle()` ile
+  ilk sayfayı doldurur. Satır ekleme `_satirlari_ekle(rows)` metodundadır.
+- Fiş listeleri (Kasa, Banka, Cari, Fatura, Çek/Senet) ve Tanımlar kart listeleri (Cari, Stok,
+  Hizmet, Kasa, Banka Kurum/Hesap) bu bileşeni kullanır → açılış/sekme geçişlerindeki kasıntı giderilir.
+- "Kaynağa Git" (`select_and_highlight_fis`): hedef fiş ilk yüklenen sayfada yoksa tüm sayfalar
+  otomatik yüklenip fiş bulunur ve seçilir.
 
 ---
 
@@ -437,13 +552,17 @@ python __main__.py
 - `reportlab`: PDF dışa aktarma
 
 Veritabanı `core/db.py` çalıştırıldığında `on_muhasebe.db` olarak otomatik oluşturulur.
+SQLite bağlantısında `PRAGMA foreign_keys = ON` açıktır (fiş silinince satırlar CASCADE ile temizlenir).
 
 ---
 
 ## 8. Geliştirme Notları / Kurallar
 
 1. `iptal()` metodunda `self.destroy()` kullanılmaz; `pack_forget()` + `on_close()` + `view_container.pack()` kullanılır.
-2. `main_window.py` içinde `_yeniden_yukle_aktif_modul` metodu ve `module_map` iki yerde bulunur; yeni modül eklerken ikisine de ekleme yapılmalıdır.
+   (İstisna: `fatura_fire_form.py`'deki `kapat()` kendi listesini yeniden paketler ve `listele()` çağırır.)
+2. `main_window.py` içinde `_yeniden_yukle_aktif_modul` metodu ve `module_map` **tek yerde** tanımlıdır
+   (eski iki kopya birleştirildi; `go_to_module_and_select_fis` ayrı bir metottur). Yeni modül eklerken
+   `module_map`'e hem bağımlılık listesi hem de ana sınıf eklenmelidir.
 3. Lookup widget'ları `verileri_yukle()` ve `ayarla_form_yapisi()` çağrılarından sonra yapılandırılmalıdır.
 4. Yeni kart ekleme işlemlerinde `ui/dialogs.py` içindeki `ac_kart_dialog` kullanılır.
 5. Tüm kayıtlarda `firma_id` ve `yil` bilgisi korunmalıdır.
@@ -452,24 +571,46 @@ Veritabanı `core/db.py` çalıştırıldığında `on_muhasebe.db` olarak otoma
 8. Düzenleme modunda fiş yüklerken KDV hesap satırları (191/391) normal satır listesine alınmaz; kaydederken yeniden üretilir.
 9. KDV kartları (`tur='KDV'`) normal Gider/Gelir lookup'larında gösterilmez (tür filtresi).
 10. Fiş tarihi seçili çalışma yılı dışında olamaz; tüm fiş formları kaydetmeden önce `aktif_yil_kontrolu(...)` ile bunu engeller. Importta dönem dışı satırlar uyarı ile kaydedilir.
+11. **Fiş no tekrarı:** `fis_kaydet`/`fis_guncelle` aynı firma + yıl (+ tarih) içinde mükerrer numarayı `fis_no_kontrol(...)` ile reddeder.
+12. **SQL enjeksiyon whitelist:** `kart_sil`, `kaydet_kart`, `is_kart_kullanilmis_mi` fonksiyonlarına tablo adı yalnızca `GECERLI_KART_TABLOLARI` üzerinden geçer.
+13. **KDV yuvarlama:** Tüm KDV hesabı `utils/formatters.py` içindeki `kdv_hesapla` (Decimal + ROUND_HALF_UP) ile yapılır; elle `round()`/float aritmetiği kullanılmaz.
+14. **Satır içi düzenleme:** Formlarda yeni satır girişi `EditableTreeview` ile yapılır; üst giriş alanı yalnızca yeni satır ekler. KDV % hücresi düzenlenebilir, hesap değişince kart KDV'si otomatik uygulanır, "Toplam (KDV Dahil)" hücresi düzenlenince birim fiyat geri hesaplanır.
+15. **Fire Fişi** KDV'sizdir: stok satırları alacak, üstteki Gider kartı toplam borç — KDV satırı üretilmez.
+16. **Hizmet satırı tutarı = miktar × birim fiyat:** Hizmet kartı raporları (mizan, ekstre, satış raporu hizmet bölümü) tutarı `fis_satirlari.borc/alacak` yerine `miktar * birim_fiyat`'tan hesaplar. Böylece veritabanında miktar elle düzeltildiğinde raporlar da güncellenir (fiş formuyla tutarlı). Karşı satırlar (Cari/Kasa/Banka) tutar bazlıdır.
+17. **Raporlar otomatik yüklenmez:** Raporlar sekmesine geçişte hiçbir rapor `listele()` çalıştırmaz; yalnızca "Listele / Raporu Getir" butonu veriyi doldurur. `yenile()` yalnızca filtre/lookup verisini tazeler.
+18. **Tarih filtresi LEFT JOIN içinde etkisiz olur:** Tarih aralığı koşulu `LEFT JOIN ... ON ... AND f.tarih BETWEEN ? AND ?` şeklinde yazılırsa filtrelenmez (join tarafı boş kalır, satırlar gelir). Tarih filtresi `fs.fis_id IN (SELECT id FROM fisler WHERE tarih BETWEEN ? AND ?)` (veya WHERE) ile uygulanmalıdır.
+19. **Sayfalama:** Fiş/tanım listelerinde `listele()` tüm kayıtları çekmez; `SayfaliListeMixin` ile `LIMIT/OFFSET` kullanır. Yeni liste ekranı yazarken `_sayfa_query`/`_sayfa_params` + `_diger_sayfa_yukle()` + `_satirlari_ekle()` deseni uygulanmalıdır.
 
 ---
 
 ## 9. Güncel Durum
 
 Tamamlanan modüller:
-- Kasa (manuel + Excel import)
+- Giriş (Genel Durum dashboard — 6 özet kart)
+- Kasa (manuel + Excel import, satır içi düzenleme)
 - Banka (manuel + Excel import – KDV'siz)
 - Cari (manuel + Excel import)
-- Fatura (manuel + Excel import – KDV ayrı satır)
+- Fatura (manuel + Excel import – KDV ayrı satır) + **Fire Fişi**
 - Çek/Senet (manuel + Excel import – Giriş ve Açılış)
 - Tanımlar (manuel + Excel import – Cari, Stok, Hizmet, Kasa, Banka)
-- Raporlar (Stok/Cari/Kasa/Banka Ekstre, Stok Durum, Hizmet Kartları, **KDV Raporu**)
+- Ayarlar (Firma Tanımları, Yıl Tanımları, çalışma sırasında firma/yıl değiştirme)
+- Raporlar (Stok Durum, Stok/Cari/Kasa/Banka Ekstre, Hizmet Kartları + Detay, Çek/Senet Raporları, KDV Raporu, Cari Bakiyeleri, Satış Raporu)
 
 Tamamlanan sistemler:
 - **KDV modeli**: 191 İndirilecek / 391 Hesaplanan KDV hesapları otomatik oluşturulur;
-  Kasa ve Fatura fişlerinde KDV ayrı satır olarak kaydedilir; Banka KDV'sizdir.
+  Kasa ve Fatura fişlerinde KDV ayrı satır olarak kaydedilir; Banka ve Fire Fişi KDV'sizdir.
 - **Akıllı giriş**: Kasa ve Fatura formlarında "Tutar (KDV Dahil)" girişiyle birim fiyat otomatik hesaplanır.
+- **Satır içi düzenleme (EditableTreeview)**: Kasa, Banka, Cari, Fatura, Çek/Senet, Açılış formlarında Excel tarzı hücre düzenleme.
+- **Hizmet faturalarında miktar × birim**: Fatura formu + import'ta hizmet satırları da stokla aynı şekilde miktar × birim fiyat ile çalışır (gider + gelir). Raporlar (mizan, hizmet ekstre, satış raporu) hizmet tutarlarını miktar × birimden hesaplar — miktar manuel düzeltildiğinde raporlar da güncellenir.
+- **Rapor performansı**: Raporlar sekmesine geçişte otomatik yükleme kaldırıldı (Listele/Raporu Getir ile dolar); ekstre hesap seçimleri aramalı LookupWidget'a çevrildi; Cari Bakiyeleri'ne cari türü filtresi eklendi; Hizmet Kartları Raporu'nun tarih aralığı filtresi düzeltildi.
+- **Sayfalama (infinite scroll)**: Kasa/Banka/Cari/Fatura/Çek-Senet fiş listeleri ve Tanımlar kart listeleri aşağı kaydıkça yükleme yapar — açılış/sekme geçiş kasıntısı giderildi.
+- **Veri bütünlüğü**: Fiş no tekrar kontrolü, kart tablosu whitelist (SQL enjeksiyon koruması), KDV'de Decimal + ROUND_HALF_UP ticari yuvarlama, `PRAGMA foreign_keys=ON` + CASCADE silme.
+- **KDV Raporu**: 191/391 hareketleri, aylık alt toplamlar ve "Ödenecek/Devreden KDV (391 − 191)" farkı.
 
 Uygulama, tek kullanıcılı yerel ön muhasebe işlemlerini fiş bazlı olarak yönetebilecek durumdadır.
 Tüm modüller Excel import desteğine sahiptir.
+
+**Bekleyen özellikler (detay için `plan.md`):**
+- Hesap Taşı (Hizmet Kartları): sağ tık → kayıtları aynı türdeki başka karta taşıma (opsiyonel tarih aralığı).
+- İsteğe bağlı: "Kayıt Et" tıklanırken açık satır düzenlemesinin otomatik onaylanması; Çek/Senet kolonu için satır içi seçim.
+- `docs/laravel/` altında Laravel + Vue + Inertia web geçiş planı ayrıca hazırlanmıştır (bu dokümanın kapsamı dışında).

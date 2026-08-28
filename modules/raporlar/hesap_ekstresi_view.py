@@ -5,6 +5,8 @@ from datetime import datetime
 from core.db import veritabani_baglan
 from utils.formatters import format_currency, format_date, format_miktar
 from utils.export import export_treeview_data
+from ui.widgets.lookup_widget import LookupWidget
+from ui.dialogs import ac_kart_dialog
 
 class HesapEkstresiView(tk.Frame):
     def __init__(self, parent, main_app, hesap_turu):
@@ -12,6 +14,9 @@ class HesapEkstresiView(tk.Frame):
         self.main_app = main_app
         self.hesap_turu = hesap_turu
         self.hesap_dict = {}
+        # Hizmet satırlarında tutar = miktar × birim_fiyat olarak hesaplanır
+        # (manuel miktar düzeltmelerinin rapora yansıması için)
+        self.miktar_bazli = self.hesap_turu == "Hizmet"
         self.create_widgets()
         self._load_filter_data()
 
@@ -21,8 +26,8 @@ class HesapEkstresiView(tk.Frame):
         filter_frame.pack(fill="x", padx=10, pady=10)
 
         tk.Label(filter_frame, text=f"{self.hesap_turu} Seç:", bg="#f5f7fb").pack(side="left", padx=(0, 2))
-        self.cmb_hesap_filtre = ttk.Combobox(filter_frame, state="readonly", width=30)
-        self.cmb_hesap_filtre.pack(side="left", padx=(0, 10))
+        self.lookup_hesap = LookupWidget(filter_frame)
+        self.lookup_hesap.pack(side="left", padx=(0, 10))
 
         tk.Label(filter_frame, text="Baş. Tarihi:", bg="#f5f7fb").pack(side="left", padx=(10, 2))
         self.ent_bas_tarih = DateEntry(filter_frame, date_pattern="dd.mm.yyyy", width=10)
@@ -109,19 +114,28 @@ class HesapEkstresiView(tk.Frame):
         cursor.execute(f"SELECT id, {ad_kolonu} FROM {tablo_adi} WHERE durum=1 AND firma_id=?", (self.main_app.aktif_firma_id,))
         self.hesap_dict = {row[1]: row[0] for row in cursor.fetchall()}
         conn.close()
-        self.cmb_hesap_filtre['values'] = list(self.hesap_dict.keys())
-        if self.cmb_hesap_filtre['values']:
-            self.cmb_hesap_filtre.set(self.cmb_hesap_filtre['values'][0])
+        self.lookup_hesap.configure_lookup(
+            title=f"{self.hesap_turu} Seç",
+            data_dict=self.hesap_dict,
+            on_new=lambda: self._yeni_kart(tablo_adi),
+        )
+        # İlk seçim yok; kullanıcı Lookup'tan seçip Listele'ye basar
+
+    def _yeni_kart(self, tablo_adi):
+        sonuc = ac_kart_dialog(self, tablo_adi, firma_id=self.main_app.aktif_firma_id)
+        if sonuc:
+            self._load_filter_data()
+        return sonuc
 
     def listele(self):
         for i in self.tree.get_children(): self.tree.delete(i)
         
-        secili_hesap_adi = self.cmb_hesap_filtre.get()
-        if not secili_hesap_adi:
+        secili_hesap_adi = self.lookup_hesap.get_value()
+        hesap_id = self.lookup_hesap.get()
+        if not hesap_id:
             messagebox.showwarning("Uyarı", f"Lütfen bir {self.hesap_turu} seçin.", parent=self)
             return
 
-        hesap_id = self.hesap_dict.get(secili_hesap_adi)
         bas_tarih = self.ent_bas_tarih.get_date().strftime("%Y-%m-%d")
         bit_tarih = self.ent_bit_tarih.get_date().strftime("%Y-%m-%d")
 
@@ -137,11 +151,21 @@ class HesapEkstresiView(tk.Frame):
 
             # ---- Para bazlı ekstreler (Cari/Kasa/Banka/Hizmet) ----
             # 1. Devir Bakiyesini Hesapla
-            cursor.execute("""
-                SELECT SUM(borc) - SUM(alacak) FROM fis_satirlari fs
-                JOIN fisler f ON f.id = fs.fis_id
-                WHERE fs.hesap_turu = ? AND fs.hesap_id = ? AND f.tarih < ? AND fs.firma_id = ?
-            """, (self.hesap_turu, hesap_id, bas_tarih, self.main_app.aktif_firma_id))
+            # Hizmet için tutar = miktar × birim_fiyat (kayıtlı borç/alacak değil)
+            if self.miktar_bazli:
+                cursor.execute("""
+                    SELECT SUM(CASE WHEN fs.borc > 0 THEN fs.miktar * fs.birim_fiyat ELSE 0 END)
+                         - SUM(CASE WHEN fs.alacak > 0 THEN fs.miktar * fs.birim_fiyat ELSE 0 END)
+                    FROM fis_satirlari fs
+                    JOIN fisler f ON f.id = fs.fis_id
+                    WHERE fs.hesap_turu = ? AND fs.hesap_id = ? AND f.tarih < ? AND fs.firma_id = ?
+                """, (self.hesap_turu, hesap_id, bas_tarih, self.main_app.aktif_firma_id))
+            else:
+                cursor.execute("""
+                    SELECT SUM(borc) - SUM(alacak) FROM fis_satirlari fs
+                    JOIN fisler f ON f.id = fs.fis_id
+                    WHERE fs.hesap_turu = ? AND fs.hesap_id = ? AND f.tarih < ? AND fs.firma_id = ?
+                """, (self.hesap_turu, hesap_id, bas_tarih, self.main_app.aktif_firma_id))
             devir_bakiye = cursor.fetchone()[0] or 0.0
 
             self.tree.insert("", "end", values=(
@@ -152,22 +176,43 @@ class HesapEkstresiView(tk.Frame):
             ), tags=('devir',))
 
             # 2. Tarih Aralığındaki Hareketleri Çek
-            cursor.execute("""
-                SELECT f.tarih, f.fis_no, f.fis_turu, fs.aciklama, fs.borc, fs.alacak
-                FROM fis_satirlari fs
-                JOIN fisler f ON f.id = fs.fis_id
-                WHERE fs.hesap_turu = ? AND fs.hesap_id = ? AND f.tarih BETWEEN ? AND ? AND fs.firma_id = ?
-                ORDER BY f.tarih, f.id
-            """, (self.hesap_turu, hesap_id, bas_tarih, bit_tarih, self.main_app.aktif_firma_id))
-            
+            if self.miktar_bazli:
+                cursor.execute("""
+                    SELECT f.tarih, f.fis_no, f.fis_turu, fs.aciklama, fs.borc, fs.alacak, fs.miktar, fs.birim_fiyat
+                    FROM fis_satirlari fs
+                    JOIN fisler f ON f.id = fs.fis_id
+                    WHERE fs.hesap_turu = ? AND fs.hesap_id = ? AND f.tarih BETWEEN ? AND ? AND fs.firma_id = ?
+                    ORDER BY f.tarih, f.id
+                """, (self.hesap_turu, hesap_id, bas_tarih, bit_tarih, self.main_app.aktif_firma_id))
+            else:
+                cursor.execute("""
+                    SELECT f.tarih, f.fis_no, f.fis_turu, fs.aciklama, fs.borc, fs.alacak
+                    FROM fis_satirlari fs
+                    JOIN fisler f ON f.id = fs.fis_id
+                    WHERE fs.hesap_turu = ? AND fs.hesap_id = ? AND f.tarih BETWEEN ? AND ? AND fs.firma_id = ?
+                    ORDER BY f.tarih, f.id
+                """, (self.hesap_turu, hesap_id, bas_tarih, bit_tarih, self.main_app.aktif_firma_id))
+
             hareketler = cursor.fetchall()
-            
+
             toplam_borc = 0.0
             toplam_alacak = 0.0
 
             bakiye = devir_bakiye
             for hareket in hareketler:
-                tarih, fis_no, fis_turu, aciklama, borc, alacak = hareket
+                if self.miktar_bazli:
+                    tarih, fis_no, fis_turu, aciklama, borc, alacak, miktar, birim_fiyat = hareket
+                    # Net tutar = miktar × birim_fiyat; yön kayıtlı borç/alacak'tan gelir
+                    miktar = miktar or 0.0
+                    birim_fiyat = birim_fiyat or 0.0
+                    if borc and borc > 0:
+                        borc, alacak = miktar * birim_fiyat, 0.0
+                    elif alacak and alacak > 0:
+                        borc, alacak = 0.0, miktar * birim_fiyat
+                    else:
+                        borc, alacak = 0.0, 0.0
+                else:
+                    tarih, fis_no, fis_turu, aciklama, borc, alacak = hareket
                 bakiye += borc - alacak
                 self.tree.insert("", "end", values=(
                     format_date(tarih),
@@ -309,10 +354,11 @@ class HesapEkstresiView(tk.Frame):
         return toplam_maliyet
 
     def disari_aktar(self, format_type):
-        secili_hesap_adi = self.cmb_hesap_filtre.get()
+        secili_hesap_adi = self.lookup_hesap.get_value() or self.hesap_turu
         report_title = f"{secili_hesap_adi} - {self.hesap_turu} Ekstresi"
         export_treeview_data(self.tree, report_title, format_type)
 
     def yenile(self):
+        # Rapor sekmesine geçişte otomatik listeleme YAPILMAZ;
+        # yalnızca lookup verisi tazelenir, kullanıcı "Listele" ile yükler.
         self._load_filter_data()
-        self.listele()

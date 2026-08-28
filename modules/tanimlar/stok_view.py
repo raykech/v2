@@ -6,8 +6,9 @@ from core.services import kart_sil as kart_sil_service, kaydet_kart
 from utils.formatters import format_currency, parse_currency, format_miktar
 from ui.widgets.lookup_widget import LookupWidget
 from ui.dialogs import ac_kart_dialog
+from ui.widgets.pagination import SayfaliListeMixin
 
-class StokTanimView(tk.Frame):
+class StokTanimView(SayfaliListeMixin, tk.Frame):
     def __init__(self, parent, main_app):
         super().__init__(parent, bg="#f5f7fb")
         self.main_app = main_app
@@ -145,6 +146,7 @@ class StokTanimView(tk.Frame):
         self.tree.bind("<<TreeviewSelect>>", self.kayit_secildi)
         self.tree.tag_configure('low_stock', foreground='red')
         self.tree.tag_configure('passive', foreground='gray')
+        self._init_sayfalama(self.tree)
 
     def _load_and_configure_data(self):
         """Filtreler ve lookup'lar için gerekli veri sözlüklerini yükler."""
@@ -197,6 +199,10 @@ class StokTanimView(tk.Frame):
     def listele(self):
         for i in self.tree.get_children():
             self.tree.delete(i)
+        self._sayfa_yuklenen = 0
+        self._sayfa_tukendi = False
+        self._stok_bakiyeleri = {}
+        self._stok_maliyetleri = {}
         conn = None
         try:
             conn = veritabani_baglan()
@@ -216,7 +222,7 @@ class StokTanimView(tk.Frame):
                 WHERE fs.hesap_turu = 'Stok' AND fs.firma_id = ?
                 GROUP BY fs.hesap_id
             """, (self.main_app.aktif_firma_id,))
-            stock_balances = {row[0]: row[1] for row in cursor.fetchall()}
+            self._stok_bakiyeleri = {row[0]: row[1] for row in cursor.fetchall()}
 
             # 2. FIFO Maliyetlerini hesaplamak için tüm alışları al
             cursor.execute("""
@@ -230,15 +236,16 @@ class StokTanimView(tk.Frame):
                 ORDER BY f.tarih DESC, f.id DESC
             """, (self.main_app.aktif_firma_id,))
             purchase_transactions = cursor.fetchall()
-            
-            stock_costs = {stok_id: 0.0 for stok_id in stock_balances}
-            remaining_quantities = stock_balances.copy()
+
+            stock_costs = {sid: 0.0 for sid in self._stok_bakiyeleri}
+            remaining_quantities = self._stok_bakiyeleri.copy()
 
             for stok_id, purchase_qty, unit_price in purchase_transactions:
                 if stok_id in remaining_quantities and remaining_quantities[stok_id] > 0:
                     qty_to_use = min(remaining_quantities[stok_id], purchase_qty)
                     stock_costs[stok_id] += qty_to_use * unit_price
                     remaining_quantities[stok_id] -= qty_to_use
+            self._stok_maliyetleri = stock_costs
 
             # 3. Stok kartlarını al
             where_clauses = ["firma_id=?"]
@@ -247,7 +254,7 @@ class StokTanimView(tk.Frame):
             if secili_kategori != "Tümü":
                 where_clauses.append("kategori = ?")
                 params.append(secili_kategori)
-            
+
             if secili_durum != "Tümü":
                 where_clauses.append("durum = ?")
                 params.append(1 if secili_durum == "Aktif" else 0)
@@ -256,34 +263,31 @@ class StokTanimView(tk.Frame):
                 where_clauses.append("(stok_adi LIKE ? OR stok_kodu LIKE ?)")
                 params.extend([f"%{arama_metni}%", f"%{arama_metni}%"])
 
-            query = "SELECT id, stok_kodu, stok_adi, kategori, birim, alis_fiyati, satis_fiyati, durum, kritik_miktar, kdv_oran FROM stoklar"
-            if where_clauses: query += " WHERE " + " AND ".join(where_clauses)
-            query += " ORDER BY id DESC"
-            
-            cursor.execute(query, params)
-            stoklar = cursor.fetchall()
-
-            # 4. Verileri birleştir ve Treeview'e ekle
-            for stok in stoklar:
-                stok_id, stok_kodu, stok_adi, kategori, birim, alis_fiyati, satis_fiyati, durum, kritik_miktar, kdv_oran = stok
-                mevcut_miktar = stock_balances.get(stok_id, 0.0)
-                kalan_maliyet = stock_costs.get(stok_id, 0.0)
-                tags = []
-                if mevcut_miktar <= kritik_miktar: tags.append('low_stock')
-                if durum == 0: tags.append('passive')
-                
-                self.tree.insert("", "end", values=(
-                    stok_id, stok_kodu, stok_adi, kategori, birim,
-                    f"{kdv_oran or 0:g}",
-                    format_miktar(mevcut_miktar), 
-                    format_currency(kalan_maliyet),
-                    format_currency(alis_fiyati), format_currency(satis_fiyati)
-                ), tags=tuple(tags))
-
+            self._sayfa_query = "SELECT id, stok_kodu, stok_adi, kategori, birim, alis_fiyati, satis_fiyati, durum, kritik_miktar, kdv_oran FROM stoklar"
+            if where_clauses: self._sayfa_query += " WHERE " + " AND ".join(where_clauses)
+            self._sayfa_query += " ORDER BY id DESC"
+            self._sayfa_params = params
         except Exception as e:
             messagebox.showerror("Veri Yükleme Hatası", f"Stok kartları yüklenemedi: {e}", parent=self)
         finally:
             if conn: conn.close()
+        self._diger_sayfa_yukle()
+
+    def _satirlari_ekle(self, rows):
+        for stok in rows:
+            stok_id, stok_kodu, stok_adi, kategori, birim, alis_fiyati, satis_fiyati, durum, kritik_miktar, kdv_oran = stok
+            mevcut_miktar = self._stok_bakiyeleri.get(stok_id, 0.0)
+            kalan_maliyet = self._stok_maliyetleri.get(stok_id, 0.0)
+            tags = []
+            if mevcut_miktar <= kritik_miktar: tags.append('low_stock')
+            if durum == 0: tags.append('passive')
+            self.tree.insert("", "end", values=(
+                stok_id, stok_kodu, stok_adi, kategori, birim,
+                f"{kdv_oran or 0:g}",
+                format_miktar(mevcut_miktar),
+                format_currency(kalan_maliyet),
+                format_currency(alis_fiyati), format_currency(satis_fiyati)
+            ), tags=tuple(tags))
 
     def kayit_secildi(self, event=None):
         selected_items = self.tree.selection()

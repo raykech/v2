@@ -6,8 +6,9 @@ from core.services import kart_sil as kart_sil_service, kaydet_kart
 from utils.formatters import parse_currency, format_currency
 from ui.widgets.lookup_widget import LookupWidget
 from ui.dialogs import ac_kart_dialog
+from ui.widgets.pagination import SayfaliListeMixin
 
-class BankaHesapTanimView(tk.Frame):
+class BankaHesapTanimView(SayfaliListeMixin, tk.Frame):
     def __init__(self, parent, main_app):
         super().__init__(parent, bg="#f5f7fb")
         self.main_app = main_app
@@ -94,6 +95,7 @@ class BankaHesapTanimView(tk.Frame):
         vsb = ttk.Scrollbar(tree_container, orient="vertical", command=self.tree.yview); hsb = ttk.Scrollbar(tree_container, orient="horizontal", command=self.tree.xview)
         self.tree.configure(yscrollcommand=vsb.set, xscrollcommand=hsb.set); vsb.pack(side="right", fill="y"); hsb.pack(side="bottom", fill="x"); self.tree.pack(side="left", fill="both", expand=True)
         self.tree.bind("<<TreeviewSelect>>", self.kayit_secildi); self.tree.tag_configure('passive', foreground='gray')
+        self._init_sayfalama(self.tree)
 
     def _load_and_configure_data(self):
         conn = veritabani_baglan(); cursor = conn.cursor()
@@ -116,19 +118,20 @@ class BankaHesapTanimView(tk.Frame):
 
     def listele(self):
         for i in self.tree.get_children(): self.tree.delete(i)
+        self._sayfa_yuklenen = 0
+        self._sayfa_tukendi = False
         where_clauses = ["h.firma_id=?"]; params = [self.main_app.aktif_firma_id]
         if self.cmb_kurum_filtre.get() != "Tümü": where_clauses.append("k.kurum_adi = ?"); params.append(self.cmb_kurum_filtre.get())
         if self.cmb_durum_filtre.get() != "Tümü": where_clauses.append("h.durum = ?"); params.append(1 if self.cmb_durum_filtre.get() == "Aktif" else 0)
         if self.ent_arama.get().strip(): where_clauses.append("(h.hesap_adi LIKE ? OR h.iban LIKE ?)"); params.extend([f"%{self.ent_arama.get().strip()}%", f"%{self.ent_arama.get().strip()}%"])
-        try:
-            conn = veritabani_baglan(); cursor = conn.cursor()
-            query = "SELECT h.id, h.hesap_adi, k.kurum_adi, h.hesap_turu, h.iban, h.durum FROM banka_hesaplari h LEFT JOIN banka_kurumlari k ON h.kurum_id = k.id WHERE " + " AND ".join(where_clauses) + " ORDER BY h.id DESC"
-            cursor.execute(query, params)
-            for row in cursor.fetchall():
-                durum_str = "Aktif" if row[5] == 1 else "Pasif"; tags = ('passive',) if row[5] == 0 else ()
-                self.tree.insert("", "end", values=(row[0], row[1], row[2] or '', row[3], row[4] or '', durum_str), tags=tags)
-            conn.close()
-        except Exception as e: messagebox.showerror("Hata", f"Banka hesapları listelenemedi: {e}", parent=self)
+        self._sayfa_query = "SELECT h.id, h.hesap_adi, k.kurum_adi, h.hesap_turu, h.iban, h.durum FROM banka_hesaplari h LEFT JOIN banka_kurumlari k ON h.kurum_id = k.id WHERE " + " AND ".join(where_clauses) + " ORDER BY h.id DESC"
+        self._sayfa_params = params
+        self._diger_sayfa_yukle()
+
+    def _satirlari_ekle(self, rows):
+        for row in rows:
+            durum_str = "Aktif" if row[5] == 1 else "Pasif"; tags = ('passive',) if row[5] == 0 else ()
+            self.tree.insert("", "end", values=(row[0], row[1], row[2] or '', row[3], row[4] or '', durum_str), tags=tags)
 
     def kayit_secildi(self, event=None):
         selected_items = self.tree.selection()

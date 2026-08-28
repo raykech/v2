@@ -17,7 +17,6 @@ class SatisRaporuView(tk.Frame):
         super().__init__(parent, bg="#f5f7fb")
         self.main_app = main_app
         self.create_widgets()
-        self.listele()
 
     def create_widgets(self):
         # Üst Alan: Ay seçimi + butonlar
@@ -111,8 +110,10 @@ class SatisRaporuView(tk.Frame):
             satis_rakami = c.fetchone()[0] or 0.0
 
             # 2) Hizmet kartı gelirleri (tur='Gelir') - net (iade düşülür)
+            # Tutar = miktar × birim_fiyat (kayıtlı borç/alacak yerine)
             c.execute("""
-                SELECT COALESCE(SUM(fs.alacak),0) - COALESCE(SUM(fs.borc),0)
+                SELECT COALESCE(SUM(CASE WHEN fs.alacak > 0 THEN fs.miktar * fs.birim_fiyat ELSE 0 END),0)
+                     - COALESCE(SUM(CASE WHEN fs.borc > 0 THEN fs.miktar * fs.birim_fiyat ELSE 0 END),0)
                 FROM fis_satirlari fs
                 JOIN fisler f ON f.id = fs.fis_id
                 JOIN hizmet_kartlari h ON h.id = fs.hesap_id
@@ -128,8 +129,10 @@ class SatisRaporuView(tk.Frame):
             cogs = self._cogs_hesapla(c, fid, bas, bit)
 
             # 4) Hizmet kartı giderleri (tur='Gider') - net (iade düşülür)
+            # Tutar = miktar × birim_fiyat (kayıtlı borç/alacak yerine)
             c.execute("""
-                SELECT COALESCE(SUM(fs.borc),0) - COALESCE(SUM(fs.alacak),0)
+                SELECT COALESCE(SUM(CASE WHEN fs.borc > 0 THEN fs.miktar * fs.birim_fiyat ELSE 0 END),0)
+                     - COALESCE(SUM(CASE WHEN fs.alacak > 0 THEN fs.miktar * fs.birim_fiyat ELSE 0 END),0)
                 FROM fis_satirlari fs
                 JOIN fisler f ON f.id = fs.fis_id
                 JOIN hizmet_kartlari h ON h.id = fs.hesap_id
@@ -209,4 +212,5 @@ class SatisRaporuView(tk.Frame):
                              format_type)
 
     def yenile(self):
-        self.listele()
+        # Sekme geçişinde otomatik listeleme yok
+        pass

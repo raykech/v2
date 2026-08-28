@@ -363,9 +363,10 @@ class FaturaFormu(tk.Frame):
         if self.is_hizmet_faturasi:
             self.lbl_hesap_baslik.config(text="Hizmet/Masraf Adı")
             self.tree.heading("stok_adi", text="Hizmet/Masraf Adı")
-            self.lbl_miktar_baslik.grid_forget()
-            self.ent_miktar.grid_forget()
-            self.tree.column("miktar", width=0, stretch=False)
+            # Hizmet faturalarında da Miktar × Birim Fiyat kullanılır (stokla tutarlı)
+            self.lbl_miktar_baslik.grid()
+            self.ent_miktar.grid()
+            self.tree.column("miktar", width=80, stretch=False)
             self.tree.column("birim", width=0, stretch=False)
             is_gelir = "Satış" in self.fis_turu
             hizmet_filtreli = {k: v['id'] for k, v in self.hizmet_dict.items() if (is_gelir and v['tur'] == 'Gelir') or (not is_gelir and v['tur'] == 'Gider')}
@@ -487,7 +488,7 @@ class FaturaFormu(tk.Frame):
             return
         
         try:
-            miktar = 1.0 if self.is_hizmet_faturasi else parse_currency(self.ent_miktar.get())
+            miktar = parse_currency(self.ent_miktar.get())
             birim_fiyat = parse_currency(self.ent_birim_fiyat.get())
             kdv_oran = int(parse_currency(self.ent_kdv_oran.get()))
             if miktar <= 0: raise ValueError("Miktar pozitif olmalı")
