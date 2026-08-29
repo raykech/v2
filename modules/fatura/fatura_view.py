@@ -141,6 +141,17 @@ class FaturaModulu(SayfaliListeMixin, tk.Frame):
     def _load_filter_data(self):
         self.tree.bind("<<TreeviewSelect>>", self._on_tree_select)
         self._init_sayfalama(self.tree)
+        # Sütun başlıklarına tıklayarak sıralama (SQL tarafı, sayfalama ile uyumlu)
+        self._enable_sortable_headers(self.tree, {
+            "id": "f.id",
+            "tarih": "f.tarih",
+            "fis_no": "f.fis_no",
+            "kaynak": "f.kaynak_modul",
+            "fis_turu": "f.fis_turu",
+            "cari_unvan": "c.unvan",
+            "aciklama": "f.aciklama",
+            "toplam_tutar": "f.toplam_tutar",
+        })
         self._update_action_buttons_state() # Başlangıçta buton durumlarını ayarla
 
         try:
@@ -193,7 +204,7 @@ class FaturaModulu(SayfaliListeMixin, tk.Frame):
             LEFT JOIN cariler c ON f.cari_id = c.id
         """
         if where_clauses: query += " WHERE " + " AND ".join(where_clauses)
-        query += " ORDER BY f.id DESC"
+        query += f" ORDER BY {self._order_by_sql()}"
 
         self._sayfa_query = query
         self._sayfa_params = params

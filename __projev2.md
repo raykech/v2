@@ -464,11 +464,11 @@ Raporlar notebook'undaki sekmeler:
 | Çek/Senet Raporları | `cek_senet_raporlari_view.py` | İç notebook: **Portföy** (güncel durum), **Vade Takvimi** (vade dilimleri), **Serüven** (seçili çek/senedin hareketleri), **Cari Bazlı Özet** |
 | KDV Raporu | `kdv_raporu_view.py` | 191 İndirilecek / 391 Hesaplanan hareketleri; tarih aralığı, aylık alt toplamlar, genel toplamlar ve **"Ödenecek/Devreden KDV (391 − 191)"** farkı |
 | Cari Bakiyeleri | `cari_bakiye_raporu_view.py` | Tüm carilerin güncel borç/alacak bakiyeleri + **Cari Türü (Müşteri/Tedarikçi/Diğer) filtresi** + toplamlar |
-| Satış Raporu | `satis_raporu_view.py` | Aylık: satış rakamı, hizmet gelirleri (miktar×birim), FIFO maliyet (COGS), giderler, **KÂR/ZARAR** |
+| Kar/Zarar Raporu | `satis_raporu_view.py` | **Aylık** sekme (ay seçimiyle detaylar) + **Yıllık** sekme (12 ay 6+6 grid, her ayın tüm kalemleri, altta tüm yıl toplamları) |
 
 Tüm raporlar **Excel (.xlsx)** ve **PDF** olarak dışa aktarılabilir (`utils/export.py` → `export_treeview_data`).
 
-**Rapor yükleme davranışı:** Raporlar sekmesine girildiğinde veya sekme değiştirildiğinde **hiçbir rapor otomatik yüklenmez** (kasıntı engeli). Her rapor yalnızca kullanıcı **"Listele" / "Raporu Getir"** butonuna bastığında doldurulur. Ekstre sekmelerinde hesap seçimi **aramalı LookupWidget** ile yapılır (Cari/Stok/Kasa/Banka/Hizmet — listeden yeni kart da eklenebilir).
+**Rapor yükleme davranışı:** Raporlar sekmesine girildiğinde **rapor sekmeleri tembel (lazy) oluşturulur** — yalnızca ilk açılan sekme (Stok Durum Raporu) başta kurulur; diğer rapor sekmeleri ilk tıklandığında oluşturulur. Hiçbir rapor otomatik veri yüklemez (kasıntı engeli); her rapor yalnızca kullanıcı **"Listele" / "Raporu Getir"** butonuna bastığında doldurulur. Ekstre sekmelerinde hesap seçimi **aramalı LookupWidget** ile yapılır (Cari/Stok/Kasa/Banka/Hizmet — listeden yeni kart da eklenebilir).
 
 **Ekstrelerde Fiş ID ve sağ tık → Kaynağa Git:** Tüm ekstre tablolarında (Stok/Cari/Kasa/Banka/Hizmet Detay) her hareket satırının başında **Fiş ID** kolonu bulunur. Gösterilen ID, hareketin geldiği fişin **kaynak fiş** ID'sidir (eğer varsa — örn. peşin ödeme fişi yerine asıl fatura ID'si görünür); kaynak yoksa fişin kendi ID'si yazılır. Bir satıra **sağ tıklanınca → "Kaynağa Git"** menüsü açılır; tıklanırsa ilgili fişin modülüne gidilir ve fiş listede seçilip vurgulanır. Hedef fiş **aktif yıldan farklı bir yıldaysa uyarı verilir** ve gidilmez (önce durum çubuğundan yıl değiştirilmeli).
 
@@ -531,11 +531,24 @@ yeni firma/yıl ile tazelenir.
 ### 6.6. Sayfalama (Infinite Scroll)
 
 `ui/widgets/pagination.py` → `SayfaliListeMixin` — Treeview listeleri için **aşağı kaydıkça yükleme**:
-- `listele()` yalnızca ilk `SAYFA_BOYUTU` (200) kaydı çeker; kullanıcı listenin alt %15'ine
+- `listele()` yalnızca ilk `SAYFA_BOYUTU` (**50**) kaydı çeker; kullanıcı listenin alt %15'ine
   indikçe bir sonraki sayfa (`LIMIT ... OFFSET ...`) otomatik yüklenir.
+- Yükleme **yalnızca gerçek kaydırma olaylarında** tetiklenir:
+  - Fare tekerleği (`<MouseWheel>`, `<Button-4/5>`)
+  - Klavye kaydırma tuşları (`Down`, `Up`, `Page Down/Up`, `Home`, `End` → `<KeyRelease>`)
+  - Scrollbar sürükleme (`tree.yview` sarmalayıcısı ile `moveto`/`scroll` çağrıları)
+  - Arka planda zamanlayıcı ile otomatik veri çekme **yoktur**; kullanıcı aşağı inmedikçe yüklenmez.
+- Her yükleme sonunda durum çubuğuna süre yazılır: `Modül | İlk yükleme: X ms (50 kayıt, toplam N)`.
 - Kullanım: sınıf `SayfaliListeMixin`'i miras alır, `create_widgets` içinde `_init_sayfalama(tree)`
   çağrılır; `listele` sorguyu `_sayfa_query`/`_sayfa_params`'a yazar ve `_diger_sayfa_yukle()` ile
   ilk sayfayı doldurur. Satır ekleme `_satirlari_ekle(rows)` metodundadır.
+- **Sorgu optimizasyonu:** Kasa/Banka/Cari fiş listelerinde `JOIN fis_satirlari + SELECT DISTINCT`
+  yerine **alt sorgu** kullanılır (`f.id IN (SELECT fis_id FROM fis_satirlari WHERE hesap_turu=... )`).
+  Böylece DB, limit uygulanmadan önce on binlerce birleşik satırı tekilleştirmek zorunda kalmaz;
+  Kasa açılışı ~1.8sn → ~280ms, sayfa yüklemesi ~1.6sn → ~30-60ms seviyelerine indi.
+- **Sütun başlığına tıklayarak SQL tarafı sıralama:** `_enable_sortable_headers(tree, sort_map)` ile
+  başlıklarda ▲/▼/↕ okları; `_order_by_sql()` whitelist'ten ORDER BY üretir (enjeksiyon koruması).
+  Kasa, Banka, Cari, Fatura, Çek/Senet listelerinde aktif.
 - Fiş listeleri (Kasa, Banka, Cari, Fatura, Çek/Senet) ve Tanımlar kart listeleri (Cari, Stok,
   Hizmet, Kasa, Banka Kurum/Hesap) bu bileşeni kullanır → açılış/sekme geçişlerindeki kasıntı giderilir.
 - "Kaynağa Git" (`select_and_highlight_fis`): hedef fiş ilk yüklenen sayfada yoksa tüm sayfalar
@@ -582,7 +595,9 @@ SQLite bağlantısında `PRAGMA foreign_keys = ON` açıktır (fiş silinince sa
 16. **Hizmet satırı tutarı = miktar × birim fiyat:** Hizmet kartı raporları (mizan, ekstre, satış raporu hizmet bölümü) tutarı `fis_satirlari.borc/alacak` yerine `miktar * birim_fiyat`'tan hesaplar. Böylece veritabanında miktar elle düzeltildiğinde raporlar da güncellenir (fiş formuyla tutarlı). Karşı satırlar (Cari/Kasa/Banka) tutar bazlıdır.
 17. **Raporlar otomatik yüklenmez:** Raporlar sekmesine geçişte hiçbir rapor `listele()` çalıştırmaz; yalnızca "Listele / Raporu Getir" butonu veriyi doldurur. `yenile()` yalnızca filtre/lookup verisini tazeler.
 18. **Tarih filtresi LEFT JOIN içinde etkisiz olur:** Tarih aralığı koşulu `LEFT JOIN ... ON ... AND f.tarih BETWEEN ? AND ?` şeklinde yazılırsa filtrelenmez (join tarafı boş kalır, satırlar gelir). Tarih filtresi `fs.fis_id IN (SELECT id FROM fisler WHERE tarih BETWEEN ? AND ?)` (veya WHERE) ile uygulanmalıdır.
-19. **Sayfalama:** Fiş/tanım listelerinde `listele()` tüm kayıtları çekmez; `SayfaliListeMixin` ile `LIMIT/OFFSET` kullanır. Yeni liste ekranı yazarken `_sayfa_query`/`_sayfa_params` + `_diger_sayfa_yukle()` + `_satirlari_ekle()` deseni uygulanmalıdır.
+19. **Sayfalama:** Fiş/tanım listelerinde `listele()` tüm kayıtları çekmez; `SayfaliListeMixin` ile `LIMIT/OFFSET` kullanır. Yeni liste ekranı yazarken `_sayfa_query`/`_sayfa_params` + `_diger_sayfa_yukle()` + `_satirlari_ekle()` deseni uygulanmalıdır. Sayfa boyutu `SAYFA_BOYUTU = 50`'dir; yükleme yalnızca gerçek kaydırma olaylarında tetiklenir (periyodik zamanlayıcı kullanılmaz).
+20. **Fiş listesi sorgusu:** Kasa/Banka/Cari gibi `fis_satirlari` ile filtreleyen listelerde `JOIN + DISTINCT` yazılmaz; `f.id IN (SELECT fis_id FROM fis_satirlari WHERE hesap_turu=... )` alt sorgusu tercih edilir (LIMIT öncesi satır şişkinliği/tekilleştirme maliyeti oluşmaz).
+21. **Raporlar lazy yüklenir:** `RaporlarModulu` notebook sekmelerini ilk tıklamada oluşturur; rapor verisi yine yalnızca "Listele / Raporu Getir" ile doldurulur.
 
 ---
 
@@ -597,7 +612,7 @@ Tamamlanan modüller:
 - Çek/Senet (manuel + Excel import – Giriş ve Açılış)
 - Tanımlar (manuel + Excel import – Cari, Stok, Hizmet, Kasa, Banka)
 - Ayarlar (Firma Tanımları, Yıl Tanımları, çalışma sırasında firma/yıl değiştirme)
-- Raporlar (Stok Durum, Stok/Cari/Kasa/Banka Ekstre, Hizmet Kartları + Detay, Çek/Senet Raporları, KDV Raporu, Cari Bakiyeleri, Satış Raporu)
+- Raporlar (Stok Durum, Stok/Cari/Kasa/Banka Ekstre, Hizmet Kartları + Detay, Çek/Senet Raporları, KDV Raporu, Cari Bakiyeleri, **Kar/Zarar Raporu** — Aylık/Yıllık)
 
 Tamamlanan sistemler:
 - **KDV modeli**: 191 İndirilecek / 391 Hesaplanan KDV hesapları otomatik oluşturulur;
@@ -606,7 +621,12 @@ Tamamlanan sistemler:
 - **Satır içi düzenleme (EditableTreeview)**: Kasa, Banka, Cari, Fatura, Çek/Senet, Açılış formlarında Excel tarzı hücre düzenleme.
 - **Hizmet faturalarında miktar × birim**: Fatura formu + import'ta hizmet satırları da stokla aynı şekilde miktar × birim fiyat ile çalışır (gider + gelir). Raporlar (mizan, hizmet ekstre, satış raporu) hizmet tutarlarını miktar × birimden hesaplar — miktar manuel düzeltildiğinde raporlar da güncellenir.
 - **Rapor performansı**: Raporlar sekmesine geçişte otomatik yükleme kaldırıldı (Listele/Raporu Getir ile dolar); ekstre hesap seçimleri aramalı LookupWidget'a çevrildi; Cari Bakiyeleri'ne cari türü filtresi eklendi; Hizmet Kartları Raporu'nun tarih aralığı filtresi düzeltildi.
-- **Sayfalama (infinite scroll)**: Kasa/Banka/Cari/Fatura/Çek-Senet fiş listeleri ve Tanımlar kart listeleri aşağı kaydıkça yükleme yapar — açılış/sekme geçiş kasıntısı giderildi.
+- **Sayfalama (infinite scroll)**: Kasa/Banka/Cari/Fatura/Çek-Senet fiş listeleri ve Tanımlar kart listeleri aşağı kaydıkça yükleme yapar; sayfa boyutu 50, yükleme yalnızca gerçek kaydırma olaylarında tetiklenir — açılış/sekme geçiş kasıntısı giderildi.
+- **Fiş listesi performansı**: Kasa/Banka/Cari listelerinde `JOIN + DISTINCT` yerine alt sorgu kullanıldı; Kasa açılışı ~1.8sn → ~280ms, sayfa başına yükleme ~1.6sn → ~30-60ms oldu.
+- **Sütun sıralama (SQL tarafı)**: Fiş listelerinde başlık tıklayınca ▲/▼ sıralama; sayfalama ile birlikte çalışır.
+- **Yükleme süresi göstergesi**: Alt durum çubuğunda ilk/sayfa yükleme süresi ve kayıt sayısı görüntülenir.
+- **Raporlar lazy yükleme**: Raporlar sekmesi açılırken tüm raporlar değil, yalnızca seçilen sekme oluşturulur; raporlar sekmesi açılışı ~1.5sn → ~620ms.
+- **Kar/Zarar Raporu**: Satış Raporu yeniden adlandırıldı; **Aylık** (mevcut detay) ve **Yıllık** (12 ay 6+6 grid + genel toplamlar) sekmeleri eklendi.
 - **Veri bütünlüğü**: Fiş no tekrar kontrolü, kart tablosu whitelist (SQL enjeksiyon koruması), KDV'de Decimal + ROUND_HALF_UP ticari yuvarlama, `PRAGMA foreign_keys=ON` + CASCADE silme.
 - **KDV Raporu**: 191/391 hareketleri, aylık alt toplamlar ve "Ödenecek/Devreden KDV (391 − 191)" farkı.
 

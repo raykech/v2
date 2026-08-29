@@ -198,6 +198,17 @@ class CekSenetModulu(SayfaliListeMixin, tk.Frame):
 
         self.tree.bind("<<TreeviewSelect>>", self._on_tree_select)
         self._init_sayfalama(self.tree)
+        # Sütun başlıklarına tıklayarak sıralama (SQL tarafı, sayfalama ile uyumlu)
+        self._enable_sortable_headers(self.tree, {
+            "id": "f.id",
+            "tarih": "f.tarih",
+            "fis_no": "f.fis_no",
+            "kaynak": "f.kaynak_modul",
+            "fis_turu": "f.fis_turu",
+            "seri_no": "seri_nolar",
+            "aciklama": "f.aciklama",
+            "toplam_tutar": "f.toplam_tutar",
+        })
         self._update_action_buttons_state()
 
     def _on_tree_select(self, event):
@@ -252,7 +263,7 @@ class CekSenetModulu(SayfaliListeMixin, tk.Frame):
             JOIN cekler_senetler cs ON h.cek_senet_id = cs.id
             WHERE {" AND ".join(where_clauses)}
             GROUP BY f.id
-            ORDER BY f.id DESC
+            ORDER BY {self._order_by_sql()}
         """
         self._sayfa_query = query
         self._sayfa_params = params

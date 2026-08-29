@@ -33,6 +33,25 @@ Bu dosya: tamamlanan işler, kararlar ve ileride yapılacak özelliklerin notudu
 
 ---
 
+### Performans optimizasyonları
+- **Fiş listesi sorgu optimizasyonu:** Kasa/Banka/Cari listelerinde `JOIN fis_satirlari + SELECT DISTINCT` yerine `f.id IN (SELECT fis_id FROM fis_satirlari ...)` alt sorgusu kullanıldı. Kasa açılışı ~1.8sn → ~280ms, sayfa yüklemesi ~1.6sn → ~30-60ms.
+- **Sayfalama (infinite scroll) iyileştirmeleri:** Sayfa boyutu 200→50; yükleme yalnızca gerçek kaydırma olaylarında (tekerlek/klavye/scrollbar) tetiklenir; periyodik zamanlayıcı yok.
+- **Yükleme süresi göstergesi:** Durum çubuğunda ilk/sayfa yükleme ms ve kayıt sayısı gösterilir.
+- **Raporlar lazy yükleme:** Raporlar sekmesi açılırken tüm raporlar birden kurulmaz; yalnızca tıklanan sekme oluşturulur. Açılış ~1.5sn → ~620ms.
+- **Kar/Zarar Raporu (Aylık/Yıllık):** Satış Raporu yeniden adlandırıldı; Aylık (mevcut) + Yıllık (12 ay 6×6 grid, her ayın tüm kalemleri, altta genel toplam) sekmeleri eklendi.
+- **Enter ile giriş düzeltmesi:** Giriş ekranına pencere genelinde `<Return>` ve `<KP_Enter>` bağlandı (odak nerede olursa olsun çalışır).
+
+### Kullanıcı Deneyimi — Liste sütun sıralama (fiş listeleri)
+- **`ui/widgets/pagination.py`** — `SayfaliListeMixin`'e SQL tarafı sütun sıralama eklendi:
+  - `_enable_sortable_headers(tree, sort_map)` → başlıklarda tıklanabilir oklar (▲/▼/↕).
+  - `_order_by_sql()` → whitelist'ten ORDER BY üretir; sayfalama (LIMIT/OFFSET) bozulmaz.
+  - `sort_map` sütun→SQL ifadesi eşlemesidir; kullanıcı girdisi SQL'e girmez (enjeksiyon koruması).
+- **Kasa, Banka, Cari, Fatura, Çek/Senet fiş listeleri** bu özelliğe bağlandı.
+  - Varsayılan sıralama `f.id DESC`; tarih/tutar/metin sütunlarına tıklayarak ASC↔DESC geçişi.
+  - Fatura'da Cari Unvan (`c.unvan`), Çek/Senet'te Seri No (`seri_nolar` alias) de sıralanabilir.
+
+---
+
 ## 🟠 Kararlar (kullanıcı onaylı)
 
 ### Hizmet kartı türü kilidi (uygulandı — `hizmet_view.py`)

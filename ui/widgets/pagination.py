@@ -16,6 +16,12 @@ Kullanım:
         self._sayfa_yuklenen = 0
         self._sayfa_tukendi = False
 
+  - Sıralama (isteğe bağlı): tree kurulduktan sonra
+        self._enable_sortable_headers(self.tree, {"tarih": "f.tarih", ...})
+    çağrılır (whitelist: sütun -> SQL ifadesi) ve listele içindeki ORDER BY
+        query += f" ORDER BY {self._order_by_sql()}"
+    ile üretilir. Başlık tıklamaları SQL tarafında sıralar, sayfalama bozulmaz.
+
 NOT: Yükleme yalnızca gerçek kaydırma olaylarında tetiklenir (tekerlek,
 klavye, scrollbar sürükleme). Kullanıcı aşağı inmedikçe arka planda
 zamanlayıcı ile veri çekilmez.
@@ -36,6 +42,10 @@ class SayfaliListeMixin:
         self._sayfa_yukleniyor = False
         self._sayfa_query = None
         self._sayfa_params = []
+        self._siralama_col = None
+        self._siralama_dir = "DESC"
+        self._siralama_sort_map = {}
+        self._siralama_default = "f.id DESC"
         # Windows / macOS tekerlek + Linux buton 4/5
         tree.bind("<MouseWheel>", self._sayfa_mousewheel)
         tree.bind("<Button-4>", self._sayfa_mousewheel)
@@ -46,6 +56,48 @@ class SayfaliListeMixin:
         # yview metodunu sararak "moveto/scroll" çağrılarını yakalarız.
         self._sayfa_yview_original = tree.yview
         tree.yview = self._sayfa_yview_sarili
+
+    # --- Sütun başlığına tıklayarak SQL tarafı sıralama ---
+    def _enable_sortable_headers(self, tree, sort_map, default_col="id", default_dir="DESC"):
+        """
+        Treeview sütun başlıklarına tıklanabilir sıralama okları ekler (▲/▼/↕).
+        sort_map: {tree_sütunu: SQL_ifadesi} — whitelist; kullanıcı girdisi SQL'e girmez.
+        listele() içindeki ORDER BY self._order_by_sql() ile üretilmelidir.
+        """
+        self._siralama_sort_map = dict(sort_map)
+        self._siralama_base_texts = {col: tree.heading(col, "text") for col in sort_map}
+        self._siralama_col = default_col if default_col in sort_map else None
+        self._siralama_dir = default_dir
+        for col in sort_map:
+            tree.heading(col, command=lambda c=col: self._siralama_degistir(c))
+        self._siralama_goster()
+
+    def _siralama_degistir(self, col):
+        if self._siralama_col == col:
+            self._siralama_dir = "DESC" if self._siralama_dir == "ASC" else "ASC"
+        else:
+            self._siralama_col = col
+            self._siralama_dir = "ASC"
+        self._siralama_goster()
+        self.listele()
+
+    def _siralama_goster(self):
+        tree = self._sayfa_tree
+        for col, base in self._siralama_base_texts.items():
+            if col == self._siralama_col:
+                ok = " ▲" if self._siralama_dir == "ASC" else " ▼"
+            else:
+                ok = " ↕"
+            tree.heading(col, text=base + ok)
+
+    def _order_by_sql(self):
+        """Aktif sıralamaya göre ORDER BY ifadesi üretir (yalnızca whitelist)."""
+        if self._siralama_col and self._siralama_col in self._siralama_sort_map:
+            expr = self._siralama_sort_map[self._siralama_col]
+            if expr == "f.id":  # birincil anahtar zaten tekil, ek tie-breaker gerekmez
+                return f"{expr} {self._siralama_dir}"
+            return f"{expr} {self._siralama_dir}, f.id DESC"
+        return self._siralama_default
 
     def _sayfa_yview_sarili(self, *args):
         """Scrollbar'dan gelen yview('moveto'/'scroll') çağrılarında yükleme kontrolü yapar."""
