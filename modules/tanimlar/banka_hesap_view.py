@@ -4,6 +4,7 @@ import sqlite3
 from core.db import veritabani_baglan
 from core.services import kart_sil as kart_sil_service, kaydet_kart
 from utils.formatters import parse_currency, format_currency
+from utils.export import export_treeview_data
 from ui.widgets.lookup_widget import LookupWidget
 from ui.dialogs import ac_kart_dialog
 from ui.widgets.pagination import SayfaliListeMixin
@@ -85,6 +86,11 @@ class BankaHesapTanimView(SayfaliListeMixin, tk.Frame):
         self.ent_arama.bind("<KeyRelease>", lambda e: self.listele())
         btn_filtre_temizle = tk.Button(filter_frame, text="Filtreleri Temizle", command=self.filtreleri_temizle)
         btn_filtre_temizle.pack(side="left", padx=(10, 0))
+        btn_excel = tk.Button(filter_frame, text="Excel'e Aktar", command=lambda: self.disari_aktar('excel'))
+        btn_excel.pack(side="left", padx=(10, 0))
+
+        btn_pdf = tk.Button(filter_frame, text="PDF'e Aktar", command=lambda: self.disari_aktar('pdf'))
+        btn_pdf.pack(side="left", padx=(5, 0))
 
         # Liste Alanı
         tree_container = tk.Frame(liste_frame)
@@ -111,6 +117,11 @@ class BankaHesapTanimView(SayfaliListeMixin, tk.Frame):
 
     def filtreleri_temizle(self):
         self.cmb_kurum_filtre.set("Tümü"); self.cmb_durum_filtre.set("Aktif"); self.ent_arama.delete(0, tk.END); self.listele()
+
+    def disari_aktar(self, format_type):
+        self._tum_veriyi_yukle()
+        export_treeview_data(self.tree, "Banka Hesapları", format_type)
+        self.listele()
 
     def formu_temizle(self):
         self.selected_id = None; self.ent_hesap_adi.delete(0, tk.END); self.lookup_kurum.clear(); self.cmb_hesap_turu.set("Vadesiz"); self.ent_iban.delete(0, tk.END); self.ent_komisyon.delete(0, tk.END); self.cmb_durum.set("Aktif"); self.ent_hesap_adi.focus_set()

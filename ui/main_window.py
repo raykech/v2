@@ -118,6 +118,13 @@ class AnaPencere(tk.Tk):
         self.lbl_status.bind("<Button-1>", lambda e: self._firma_yil_degistir())
         self.lbl_status.pack(pady=4)
 
+    def durum_yaz(self, metin):
+        """Alt durum çubuğuna geçici/bilgilendirici metin yazar."""
+        try:
+            self.lbl_status.config(text=metin)
+        except Exception:
+            pass
+
     def _firma_yil_degistir(self):
         """Status bar tıklanınca firma/yıl seçimini değiştirir."""
         dialog = FirmaYilDialog(self, self.aktif_firma_id, self.aktif_yil)

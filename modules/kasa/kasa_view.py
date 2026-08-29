@@ -211,16 +211,20 @@ class KasaModulu(SayfaliListeMixin, tk.Frame):
         where_clauses.append("f.tarih BETWEEN ? AND ?")
         params.extend([bas_tarih, bit_tarih])
 
+        # Kasa hesabı içeren fişleri getir: JOIN + DISTINCT yerine alt sorgu
+        # kullanıyoruz (açılışta tüm satırları birleştirmek yerine hızlı çalışır).
+        satir_filtreleri = ["hesap_turu = 'Kasa'", "firma_id = ?"]
+        satir_params = [self.main_app.aktif_firma_id]
         secili_kasa = self.cmb_kasa_filtre.get()
         if secili_kasa != "Tüm Kasalar":
             kasa_id = self.kasa_dict.get(secili_kasa)
             if kasa_id:
-                where_clauses.append("fs.hesap_id = ?")
-                params.append(kasa_id)
-
-        # Always filter for transactions that involve a 'Kasa' account in fis_satirlari (aliased as fs)
-        join_clauses = ["JOIN fis_satirlari fs ON f.id = fs.fis_id"]
-        where_clauses.append("fs.hesap_turu = 'Kasa'")
+                satir_filtreleri.append("hesap_id = ?")
+                satir_params.append(kasa_id)
+        where_clauses.append(
+            f"f.id IN (SELECT fis_id FROM fis_satirlari WHERE {' AND '.join(satir_filtreleri)})"
+        )
+        params.extend(satir_params)
 
         secili_fis_turu = self.cmb_fis_turu_filtre.get()
         if secili_fis_turu != "Tümü":
@@ -232,10 +236,9 @@ class KasaModulu(SayfaliListeMixin, tk.Frame):
             where_clauses.append("(f.fis_no LIKE ? OR f.aciklama LIKE ?)")
             params.extend([f"%{arama_metni}%", f"%{arama_metni}%"])
 
-        query = f"""
-            SELECT DISTINCT f.id, f.tarih, f.fis_no, f.kaynak_modul, f.kaynak_fis_id, f.fis_turu, f.aciklama, f.toplam_tutar
+        query = """
+            SELECT f.id, f.tarih, f.fis_no, f.kaynak_modul, f.kaynak_fis_id, f.fis_turu, f.aciklama, f.toplam_tutar
             FROM fisler f
-            {' '.join(join_clauses)}
         """
         if where_clauses:
             query += " WHERE " + " AND ".join(where_clauses)

@@ -15,14 +15,19 @@ Kullanım:
         for i in self.tree.get_children(): self.tree.delete(i)
         self._sayfa_yuklenen = 0
         self._sayfa_tukendi = False
+
+NOT: Yükleme yalnızca gerçek kaydırma olaylarında tetiklenir (tekerlek,
+klavye, scrollbar sürükleme). Kullanıcı aşağı inmedikçe arka planda
+zamanlayıcı ile veri çekilmez.
 """
 import tkinter as tk
+import time
 from tkinter import messagebox
 from core.db import veritabani_baglan
 
 
 class SayfaliListeMixin:
-    SAYFA_BOYUTU = 200
+    SAYFA_BOYUTU = 50
 
     def _init_sayfalama(self, tree):
         self._sayfa_tree = tree
@@ -35,6 +40,27 @@ class SayfaliListeMixin:
         tree.bind("<MouseWheel>", self._sayfa_mousewheel)
         tree.bind("<Button-4>", self._sayfa_mousewheel)
         tree.bind("<Button-5>", self._sayfa_mousewheel)
+        # Klavye kaydırma tuşları (ok, Page Up/Down, Home/End)
+        tree.bind("<KeyRelease>", self._sayfa_keyrelease)
+        # Scrollbar sürüklemesi: scrollbar'ın command'ı tree.yview olduğu için
+        # yview metodunu sararak "moveto/scroll" çağrılarını yakalarız.
+        self._sayfa_yview_original = tree.yview
+        tree.yview = self._sayfa_yview_sarili
+
+    def _sayfa_yview_sarili(self, *args):
+        """Scrollbar'dan gelen yview('moveto'/'scroll') çağrılarında yükleme kontrolü yapar."""
+        sonuc = self._sayfa_yview_original(*args)
+        if args and args[0] in ("moveto", "scroll"):
+            self._sayfa_kontrol_et()
+        return sonuc
+
+    def _sayfa_keyrelease(self, event):
+        kaydirma_tuslari = {
+            "Down", "Up", "Next", "Prior", "Page_Down", "Page_Up",
+            "Home", "End", "KP_Down", "KP_Up", "KP_Next", "KP_Prior",
+        }
+        if event.keysym in kaydirma_tuslari:
+            self._sayfa_kontrol_et()
 
     def _sayfa_mousewheel(self, event):
         if event.num == 4:
@@ -50,7 +76,7 @@ class SayfaliListeMixin:
         self._sayfa_kontrol_et()
         return "break"
 
-    def _sayfa_kontrol_et(self):
+    def _sayfa_kontrol_et(self, event=None):
         if self._sayfa_tukendi or self._sayfa_yukleniyor or not self._sayfa_query:
             return
         try:
@@ -61,9 +87,16 @@ class SayfaliListeMixin:
         if alt >= 0.85:
             self._diger_sayfa_yukle()
 
+
+    def _tum_veriyi_yukle(self):
+        """Tüm sayfaları yükleyerek ağacı tamamen doldurur (dışa aktarım için)."""
+        while not self._sayfa_tukendi and not self._sayfa_yukleniyor and self._sayfa_query:
+            self._diger_sayfa_yukle()
     def _diger_sayfa_yukle(self):
         if self._sayfa_tukendi or self._sayfa_yukleniyor or not self._sayfa_query:
             return
+        baslangic = time.perf_counter()
+        onceki_yuklenen = self._sayfa_yuklenen
         self._sayfa_yukleniyor = True
         try:
             conn = veritabani_baglan()
@@ -84,4 +117,21 @@ class SayfaliListeMixin:
                                  f"Liste yüklenemedi: {e}",
                                  parent=self._sayfa_tree if self._sayfa_tree else None)
         finally:
+            sure_ms = (time.perf_counter() - baslangic) * 1000
+            self._yukleme_suresi_goster(sure_ms, onceki_yuklenen)
             self._sayfa_yukleniyor = False
+
+    def _yukleme_suresi_goster(self, sure_ms, onceki_yuklenen):
+        """İlk/sayfa yükleme süresini ana pencerenin durum çubuğuna yazar."""
+        try:
+            main_app = getattr(self, "main_app", None)
+            if main_app is None or not hasattr(main_app, "durum_yaz"):
+                return
+            etiket = "İlk yükleme" if onceki_yuklenen == 0 else "Sayfa yükleme"
+            modul = type(self).__name__
+            adet = self._sayfa_yuklenen - onceki_yuklenen
+            main_app.durum_yaz(
+                f"{modul} | {etiket}: {sure_ms:.1f} ms ({adet} kayıt, toplam {self._sayfa_yuklenen})"
+            )
+        except Exception:
+            pass

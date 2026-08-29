@@ -4,6 +4,7 @@ import sqlite3
 from core.db import veritabani_baglan
 from core.services import kart_sil as kart_sil_service, kaydet_kart
 from utils.formatters import format_currency, parse_currency, format_miktar
+from utils.export import export_treeview_data
 from ui.widgets.lookup_widget import LookupWidget
 from ui.dialogs import ac_kart_dialog
 from ui.widgets.pagination import SayfaliListeMixin
@@ -107,6 +108,11 @@ class StokTanimView(SayfaliListeMixin, tk.Frame):
 
         btn_filtre_temizle = tk.Button(filter_frame, text="Filtreleri Temizle", command=self.filtreleri_temizle)
         btn_filtre_temizle.pack(side="left", padx=(10, 0))
+        btn_excel = tk.Button(filter_frame, text="Excel'e Aktar", command=lambda: self.disari_aktar('excel'))
+        btn_excel.pack(side="left", padx=(10, 0))
+
+        btn_pdf = tk.Button(filter_frame, text="PDF'e Aktar", command=lambda: self.disari_aktar('pdf'))
+        btn_pdf.pack(side="left", padx=(5, 0))
 
         # --- Liste Alanı (Sağ Taraf - Alt) ---
         tree_container = tk.Frame(liste_frame)
@@ -178,6 +184,11 @@ class StokTanimView(SayfaliListeMixin, tk.Frame):
         self.cmb_kategori_filtre.set("Tümü")
         self.cmb_durum_filtre.set("Aktif")
         self.ent_arama.delete(0, tk.END)
+        self.listele()
+
+    def disari_aktar(self, format_type):
+        self._tum_veriyi_yukle()
+        export_treeview_data(self.tree, "Stok Kartları", format_type)
         self.listele()
 
     def formu_temizle(self):

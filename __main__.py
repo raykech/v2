@@ -43,6 +43,10 @@ class GirisPenceresi(tk.Tk):
         btn_giris = tk.Button(main_frame, text="Giriş Yap", command=self.giris_yap, bg="#198754", fg="white", font=("Arial", 11, "bold"), height=2)
         btn_giris.pack(fill="x", pady=(20, 0))
 
+        # Enter nerede olursa olsun (firma/yıl seçiliyken) direkt giriş yapsın
+        self.bind("<Return>", self.giris_yap)
+        self.bind("<KP_Enter>", self.giris_yap)
+
     def firmalari_yukle(self):
         try:
             conn = veritabani_baglan()
