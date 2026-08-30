@@ -1,5 +1,6 @@
 import tkinter as tk
 from core.db import veritabani_baglan
+from core.services import stok_bakiye_ve_maliyet
 from utils.formatters import format_currency
 
 
@@ -117,28 +118,9 @@ class GirisDashboardView(tk.Frame):
                 else:
                     veriler["borc"] += -bakiye       # biz cariye borçlu → borcumuz
 
-            # 6. Eldeki stok maliyet değeri (FIFO) — stok raporundaki mantıkla aynı
-            c.execute(
-                """SELECT fs.hesap_id, SUM(CASE WHEN fs.borc>0 THEN fs.miktar WHEN fs.alacak>0 THEN -fs.miktar ELSE 0 END)
-                   FROM fis_satirlari fs
-                   JOIN fisler f ON f.id = fs.fis_id
-                   WHERE fs.hesap_turu='Stok' AND fs.firma_id=? GROUP BY fs.hesap_id""", (fid,)
-            )
-            stok_bakiyeleri = {r[0]: r[1] for r in c.fetchall()}
-
-            c.execute(
-                """SELECT fs.hesap_id, fs.miktar, fs.birim_fiyat
-                   FROM fis_satirlari fs
-                   JOIN fisler f ON f.id = fs.fis_id
-                   WHERE fs.hesap_turu='Stok' AND fs.borc > 0 AND fs.firma_id=?
-                   ORDER BY f.tarih DESC, f.id DESC""", (fid,)
-            )
-            kalanlar = stok_bakiyeleri.copy()
-            for stok_id, miktar, birim_fiyat in c.fetchall():
-                if stok_id in kalanlar and kalanlar[stok_id] > 0:
-                    kullanilacak = min(kalanlar[stok_id], miktar or 0)
-                    veriler["stok"] += kullanilacak * (birim_fiyat or 0)
-                    kalanlar[stok_id] -= kullanilacak
+            # 6. Eldeki stok maliyet değeri (FIFO) — ortak servis
+            _, stok_maliyetleri = stok_bakiye_ve_maliyet(c, fid)
+            veriler["stok"] += sum(stok_maliyetleri.values())
 
         except Exception as e:
             print(f"Dashboard hesaplama hatası: {e}")

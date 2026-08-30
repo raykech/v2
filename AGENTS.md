@@ -1,7 +1,7 @@
 # Ön Muhasebe v2 — Proje Kılavuzu (Otomatik Yüklenir)
 
 Bu dosya her oturumda bağlama enjekte edilir. Projenin **detaylı** durumu
-`__projev2.md`, `plan.md`, `planv2.md` dosyalarındadır.
+`__projev2.md` ve `plan.md` dosyalarındadır.
 
 ## Proje
 - Python + Tkinter + SQLite ile yerel ön muhasebe uygulaması.
@@ -10,8 +10,8 @@ Bu dosya her oturumda bağlama enjekte edilir. Projenin **detaylı** durumu
 
 ## Kanonik Dokümanlar
 - `__projev2.md` — güncel mimari, veritabanı modeli, modüller, geliştirme kuralları (madde 1–19), **§9 Güncel Durum**
-- `plan.md` — tamamlanan işler, kararlar, bekleyen özellikler (Hesap Taşı vb.)
-- `planv2.md` — yeni modül geliştirme şablonu
+- `plan.md` — tamamlanan işler, kararlar, bekleyen özellikler (Hesap Taşı, refaktoring backlog vb.)
+  ve **yeni modül geliştirme şablonu** (eski `planv2.md` buraya taşındı, dosya artık yok)
 
 ## Devam Protokolü
 Kullanıcı "devam edelim", "kaldığımız yerden", "continue", "projeyi hatırlıyor musun"

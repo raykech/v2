@@ -1,6 +1,7 @@
 import tkinter as tk
 from tkinter import ttk, messagebox
 from core.db import veritabani_baglan
+from core.services import stok_bakiye_ve_maliyet
 from utils.formatters import format_currency, format_miktar
 from utils.export import export_treeview_data
 
@@ -25,10 +26,6 @@ class StokDurumRaporuView(tk.Frame):
         self.cmb_durum_filtre = ttk.Combobox(filter_frame, state="readonly", width=10, values=["Tümü", "Aktif", "Pasif"])
         self.cmb_durum_filtre.set("Aktif")
         self.cmb_durum_filtre.pack(side="left", padx=(0, 10))
-
-        tk.Label(filter_frame, text="Ara:", bg="#f5f7fb").pack(side="left", padx=(10, 2))
-        self.ent_arama = tk.Entry(filter_frame)
-        self.ent_arama.pack(side="left", fill="x", expand=True)
 
         btn_listele = tk.Button(filter_frame, text="Listele", command=self.listele)
         btn_listele.pack(side="left", padx=(10, 0))
@@ -70,13 +67,16 @@ class StokDurumRaporuView(tk.Frame):
         self.tree.tag_configure('low_stock', foreground='red')
 
     def _load_filter_data(self):
+        secili_kategori = self.cmb_kategori_filtre.get()
         conn = veritabani_baglan()
         cursor = conn.cursor()
         cursor.execute("SELECT deger, id FROM genel_tanimlar WHERE grup=? AND firma_id=?", ("Stok Kategorisi", self.main_app.aktif_firma_id))
         self.kategori_dict = {row[0]: row[1] for row in cursor.fetchall()}
         conn.close()
-        self.cmb_kategori_filtre['values'] = ["Tümü"] + list(self.kategori_dict.keys())
-        self.cmb_kategori_filtre.set("Tümü")
+
+        degerler = ["Tümü"] + list(self.kategori_dict.keys())
+        self.cmb_kategori_filtre['values'] = degerler
+        self.cmb_kategori_filtre.set(secili_kategori if secili_kategori in degerler else "Tümü")
 
     def listele(self):
         for i in self.tree.get_children(): self.tree.delete(i)
@@ -85,32 +85,8 @@ class StokDurumRaporuView(tk.Frame):
             conn = veritabani_baglan()
             cursor = conn.cursor()
 
-            # 1. Stok bakiyelerini hesapla
-            cursor.execute("""
-                SELECT fs.hesap_id, SUM(CASE WHEN fs.borc > 0 THEN fs.miktar WHEN fs.alacak > 0 THEN -fs.miktar ELSE 0 END)
-                FROM fis_satirlari fs
-                JOIN fisler f ON f.id = fs.fis_id
-                WHERE fs.hesap_turu = 'Stok' AND fs.firma_id = ? GROUP BY fs.hesap_id
-            """, (self.main_app.aktif_firma_id,))
-            stock_balances = {row[0]: row[1] for row in cursor.fetchall()}
-
-            # 2. FIFO Maliyetlerini hesapla
-            cursor.execute("""
-                SELECT fs.hesap_id, fs.miktar, fs.birim_fiyat FROM fis_satirlari fs
-                JOIN fisler f ON f.id = fs.fis_id
-                WHERE fs.hesap_turu = 'Stok' AND fs.borc > 0 AND fs.firma_id = ?
-                ORDER BY f.tarih DESC, f.id DESC
-            """, (self.main_app.aktif_firma_id,))
-            purchase_transactions = cursor.fetchall()
-            
-            stock_costs = {stok_id: 0.0 for stok_id in stock_balances}
-            remaining_quantities = stock_balances.copy()
-
-            for stok_id, purchase_qty, unit_price in purchase_transactions:
-                if stok_id in remaining_quantities and remaining_quantities[stok_id] > 0:
-                    qty_to_use = min(remaining_quantities[stok_id], purchase_qty)
-                    stock_costs[stok_id] += qty_to_use * unit_price
-                    remaining_quantities[stok_id] -= qty_to_use
+            # 1-2. Stok bakiye ve FIFO maliyet hesapları (ortak servis)
+            stock_balances, stock_costs = stok_bakiye_ve_maliyet(cursor, self.main_app.aktif_firma_id)
 
             # 3. Stok kartlarını filtreleyerek al
             where_clauses = ["firma_id=?"]
@@ -121,9 +97,6 @@ class StokDurumRaporuView(tk.Frame):
             if self.cmb_durum_filtre.get() != "Tümü":
                 where_clauses.append("durum = ?")
                 params.append(1 if self.cmb_durum_filtre.get() == "Aktif" else 0)
-            if self.ent_arama.get().strip():
-                where_clauses.append("(stok_adi LIKE ? OR stok_kodu LIKE ?)")
-                params.extend([f"%{self.ent_arama.get().strip()}%", f"%{self.ent_arama.get().strip()}%"])
 
             query = "SELECT id, stok_kodu, stok_adi, kategori, birim, kritik_miktar FROM stoklar WHERE " + " AND ".join(where_clauses)
             cursor.execute(query, params)

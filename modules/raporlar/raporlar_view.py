@@ -1,4 +1,4 @@
-﻿# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 import tkinter as tk
 from tkinter import ttk
 
@@ -16,8 +16,7 @@ class RaporlarModulu(tk.Frame):
         self.notebook.pack(fill="both", expand=True, padx=10, pady=10)
 
         tablar = [
-            ("Stok Durum Raporu", "stok_durum"),
-            ("Stok Ekstresi", "ekstre_Stok"),
+            ("Stok Raporları", "stok_raporlari"),
             ("Cari Ekstre", "ekstre_Cari"),
             ("Kasa Ekstresi", "ekstre_Kasa"),
             ("Banka Ekstresi", "ekstre_Banka"),
@@ -43,6 +42,10 @@ class RaporlarModulu(tk.Frame):
         self.notebook.bind("<<NotebookTabChanged>>", self._on_tab_changed)
 
     def _on_tab_changed(self, event):
+        # İç içe notebook'larda (ör. Stok/Çek-Senet raporları) alt sekme
+        # olaylarını değil, yalnızca kendi sekme değişimini işle.
+        if event.widget is not self.notebook:
+            return
         try:
             secili_sekme = self.notebook.tab(self.notebook.select(), "text")
         except Exception:
@@ -63,9 +66,9 @@ class RaporlarModulu(tk.Frame):
             self._tabs[secili_sekme] = [True, view, tab_key]
 
     def _tab_olustur(self, tab_key, parent):
-        if tab_key == "stok_durum":
-            from .stok_durum_raporu_view import StokDurumRaporuView
-            return StokDurumRaporuView(parent, self.main_app)
+        if tab_key == "stok_raporlari":
+            from .stok_raporlari_view import StokRaporlariView
+            return StokRaporlariView(parent, self.main_app)
         elif tab_key.startswith("ekstre_"):
             from .hesap_ekstresi_view import HesapEkstresiView
             hesap_turu = tab_key.split("_", 1)[1]

@@ -66,7 +66,12 @@ modules/
   raporlar/
     raporlar_view.py        Raporlar ana görünümü (Notebook sekmeleri)
     hesap_ekstresi_view.py  Hesap ekstresi (Stok/Cari/Kasa/Banka/Hizmet — FIFO destekli)
+    stok_raporlari_view.py  Stok Raporları ana sekmesi (iç Notebook, tembel sekmeler)
+    stok_rapor_tabani.py    Stok raporları ortak taban sınıfı (tarih/kategori/durum/arama/limit)
     stok_durum_raporu_view.py  Stok Durum Raporu
+    stok_satis_raporu_view.py  En Çok Satan / Az Satan + Hiç Satış Yapmayan ürünler
+    stok_hareket_raporu_view.py  En Çok Hareket Gören Ürünler
+    stok_karlik_raporu_view.py   Kârlılık Raporu (ürün bazında alış/satış/kâr, FIFO)
     hizmet_kartlari_raporu_view.py  Hizmet kartları mizan raporu
     kdv_raporu_view.py      KDV Raporu (191 İndirilecek / 391 Hesaplanan)
     cari_bakiye_raporu_view.py  Cari Bakiyeleri raporu
@@ -99,6 +104,7 @@ __importlar/                Excel import deneme/örnek dosyaları (çalışma za
 
 > Not: `modules/raporlar/stok_raporu_view.py` eski bir dosyadır ve raporlar
 > notebook'una bağlı değildir; yeni rapor yapısı `raporlar_view.py` üzerinden kurulmuştur.
+> Silinmesi `plan.md` 🔵 refaktoring backlog'da bekliyor.
 
 ---
 
@@ -189,6 +195,11 @@ __importlar/                Excel import deneme/örnek dosyaları (çalışma za
 - **KDV yardımcıları:**
   - `kdv_hesap_idleri(cursor, firma_id)` – Firmanın 191/391 KDV hesap ID'lerini döndürür `(indirilecek, hesaplanan)`.
   - `kdv_satiri_olustur(kdv_hesap_id, kdv_tutar, yon, aciklama)` – KDV için ayrı fiş satırı üretir (`yon`: `'borc'` → 191, `'alacak'` → 391).
+- **Stok yardımcısı:**
+  - `stok_bakiye_ve_maliyet(cursor, firma_id)` – Stok bakiyesi (miktar) + FIFO kalan maliyeti
+    `{stok_id: değer}` sözlükleri olarak `(bakiyeler, maliyetler)` döndürür. Tek kaynak;
+    Stok Durum Raporu ve Giriş dashboard'u kullanır. `fis_satirlari` üzerinde tam tarama
+    gerektirdiğinden **tanım listelerinde çalıştırılmaz** (Tanımlar → Stok artık saf kart listesidir).
 - **Dönem kontrolü:**
   - `aktif_yil_kontrolu(tarih_nesnesi, aktif_yil)` – Fiş tarihi seçili çalışma yılı dışındaysa açıklayıcı hata mesajı döndürür, uygunsa `None`. Tüm fiş formları kaydetmeden önce bu kontrolü yapar (yanlış yıla fiş taşınmasını engeller).
 - Çek/Senet yardımcıları:
@@ -257,7 +268,7 @@ Uygulama açıldığında giriş sekmesi **6 özet kart** gösterir (3 sütun ×
 | POS Toplam Alacak | `hesap_turu='POS'` banka hesaplarının bakiyesi |
 | Toplam Alacak | Bize borçlu olan carilerin toplamı |
 | Toplam Borç | Bizim cariye borcumuzun toplamı |
-| Eldeki Stok Maliyet (FIFO) | Stok bakiyesi × FIFO giriş maliyeti (stok raporundaki mantıkla aynı) |
+| Eldeki Stok Maliyet (FIFO) | Ortak servis `stok_bakiye_ve_maliyet` üzerinden (stok raporuyla aynı kaynak) |
 
 Sekmeye her geçişte otomatik yenilenir (`yenile()`).
 
@@ -432,6 +443,12 @@ Tanımlar notebook'u şu sekmelerden oluşur:
 
 Tanımlar sekmeler arası geçişte otomatik yenilenir.
 
+> **Stok Kartları listesi (performans):** Liste yalnızca `stoklar` tablosunu çeker;
+> "Mevcut Miktar" ve "Maliyet Değeri" sütunları kaldırıldı (eskiden her aramada
+> `fis_satirlari` üzerinde iki tam tarama + FIFO döngüsü çalışıyordu). Miktar/maliyet
+> ve kritik stok (kırmızı) boyaması artık yalnızca Stok Durum Raporu'nda gösterilir.
+> Listede sadece pasif kartlar gri boyanır.
+
 > Not: `191 İndirilecek KDV` ve `391 Hesaplanan KDV` kartları ile "KDV" grubu, veritabanı
 > şeması kurulurken (`core/db.py`) otomatik oluşturulur; elle silinmemeli/düzenlenmemelidir
 > (fiş satırlarında kullanıldıkları için kullanımda olan kart silinemez).
@@ -454,8 +471,7 @@ Raporlar notebook'undaki sekmeler:
 
 | Sekme | Dosya | İçerik |
 |---|---|---|
-| Stok Durum Raporu | `stok_durum_raporu_view.py` | Stok kartları; kategori/durum/arama filtreli, kalan miktar + maliyet |
-| Stok Ekstresi | `hesap_ekstresi_view.py` (hesap_turu='Stok') | FIFO maliyet yöntemiyle giriş/çıkış/kalan miktar + maliyet |
+| **Stok Raporları** | `stok_raporlari_view.py` | İç notebook (bkz. aşağıdaki alt sekme tablosu) — tüm stok raporları tek yerde |
 | Cari Ekstre | `hesap_ekstresi_view.py` (Cari) | Cari hareketleri + bakiye |
 | Kasa Ekstre | `hesap_ekstresi_view.py` (Kasa) | Kasa hareketleri + bakiye |
 | Banka Ekstre | `hesap_ekstresi_view.py` (Banka) | Banka hareketleri + bakiye |
@@ -466,9 +482,30 @@ Raporlar notebook'undaki sekmeler:
 | Cari Bakiyeleri | `cari_bakiye_raporu_view.py` | Tüm carilerin güncel borç/alacak bakiyeleri + **Cari Türü (Müşteri/Tedarikçi/Diğer) filtresi** + toplamlar |
 | Kar/Zarar Raporu | `satis_raporu_view.py` | **Aylık** sekme (ay seçimiyle detaylar) + **Yıllık** sekme (12 ay 6+6 grid, her ayın tüm kalemleri, altta tüm yıl toplamları) |
 
+#### Stok Raporları (alt sekmeler)
+
+Yeni stok raporları `stok_rapor_tabani.StokRaporTabani` ortak sınıfını kullanır:
+**tarih aralığı** (varsayılan: aktif yılın tamamı), **kategori**, **durum (Aktif/Pasif/Tümü)**
+ve **limit (İlk 20 / 50 / 100 / Tümü)** filtreleri + Excel/PDF aktarımı ortaktır.
+Bu raporlarda **kart arama/lookup alanı yoktur** (bilinçli karar): çıktı zaten sıralı bir
+liste olduğu için listede tekrar kart aramanın anlamı yok — tek bir ürünün hareketi
+istendiğinde **Stok Ekstresi** alt sekmesi kullanılır.
+Veri kaynağı `core/services.py` → `stok_donem_ozeti()` (fiş türü bazında dönem özeti) ve
+`stok_donem_cogs()` (kart bazında FIFO maliyet) servisleridir.
+
+| Alt Sekme | Dosya | İçerik |
+|---|---|---|
+| Stok Durum | `stok_durum_raporu_view.py` | Stok kartları; kategori/durum filtreli, kalan miktar + maliyet (ortak servis `stok_bakiye_ve_maliyet`) |
+| Stok Ekstresi | `hesap_ekstresi_view.py` (hesap_turu='Stok') | FIFO maliyet yöntemiyle giriş/çıkış/kalan miktar + maliyet |
+| En Çok Satan | `stok_satis_raporu_view.py` (mod='cok') | Net satış miktarına göre **azalan** sıralı liste (satış − satış iadesi) |
+| Az Satan | `stok_satis_raporu_view.py` (mod='az') | Satışı olan ürünlerin **artan** sıralı düşük performanslıları |
+| Hiç Satış Yapmayan | `stok_satis_raporu_view.py` → `StokHicSatisRaporuView` | Dönemde net satışı 0 olan kartlar; bağlı sermayeye (maliyet değeri) göre sıralı, "Tüm Dönem Satış" sütunuyla **ölü stok** ayrımı (turuncu) |
+| En Çok Hareket Gören | `stok_hareket_raporu_view.py` | Dönemdeki **fiş satırı sayısına** göre sıralı; alış/satış/iade/fire-çıkış miktarları + işlem hacmi + son hareket |
+| Kârlılık | `stok_karlik_raporu_view.py` | Ürün bazında alış/satış **miktar + tutarı**, **FIFO maliyet**, **kâr** ve **kâr marjı %** (yeşil/kırmızı), altta TOPLAM satırı |
+
 Tüm raporlar **Excel (.xlsx)** ve **PDF** olarak dışa aktarılabilir (`utils/export.py` → `export_treeview_data`).
 
-**Rapor yükleme davranışı:** Raporlar sekmesine girildiğinde **rapor sekmeleri tembel (lazy) oluşturulur** — yalnızca ilk açılan sekme (Stok Durum Raporu) başta kurulur; diğer rapor sekmeleri ilk tıklandığında oluşturulur. Hiçbir rapor otomatik veri yüklemez (kasıntı engeli); her rapor yalnızca kullanıcı **"Listele" / "Raporu Getir"** butonuna bastığında doldurulur. Ekstre sekmelerinde hesap seçimi **aramalı LookupWidget** ile yapılır (Cari/Stok/Kasa/Banka/Hizmet — listeden yeni kart da eklenebilir).
+**Rapor yükleme davranışı:** Raporlar sekmesine girildiğinde **rapor sekmeleri tembel (lazy) oluşturulur** — yalnızca ilk açılan sekme (Stok Raporları → Stok Durum) başta kurulur; diğer rapor sekmeleri ilk tıklandığında oluşturulur. İç içe notebook'larda (Stok Raporları, Çek/Senet Raporları) alt sekmeler de temeldir; `<<NotebookTabChanged>>` olayında `event.widget` kontrolüyle yalnızca kendi notebook'unun sekme değişimi işlenir. Hiçbir rapor otomatik veri yüklemez (kasıntı engeli); her rapor yalnızca kullanıcı **"Listele" / "Raporu Getir"** butonuna bastığında doldurulur. Ekstre sekmelerinde hesap seçimi **aramalı LookupWidget** ile yapılır (Cari/Stok/Kasa/Banka/Hizmet — listeden yeni kart da eklenebilir).
 
 **Ekstrelerde Fiş ID ve sağ tık → Kaynağa Git:** Tüm ekstre tablolarında (Stok/Cari/Kasa/Banka/Hizmet Detay) her hareket satırının başında **Fiş ID** kolonu bulunur. Gösterilen ID, hareketin geldiği fişin **kaynak fiş** ID'sidir (eğer varsa — örn. peşin ödeme fişi yerine asıl fatura ID'si görünür); kaynak yoksa fişin kendi ID'si yazılır. Bir satıra **sağ tıklanınca → "Kaynağa Git"** menüsü açılır; tıklanırsa ilgili fişin modülüne gidilir ve fiş listede seçilip vurgulanır. Hedef fiş **aktif yıldan farklı bir yıldaysa uyarı verilir** ve gidilmez (önce durum çubuğundan yıl değiştirilmeli).
 
@@ -598,6 +635,8 @@ SQLite bağlantısında `PRAGMA foreign_keys = ON` açıktır (fiş silinince sa
 19. **Sayfalama:** Fiş/tanım listelerinde `listele()` tüm kayıtları çekmez; `SayfaliListeMixin` ile `LIMIT/OFFSET` kullanır. Yeni liste ekranı yazarken `_sayfa_query`/`_sayfa_params` + `_diger_sayfa_yukle()` + `_satirlari_ekle()` deseni uygulanmalıdır. Sayfa boyutu `SAYFA_BOYUTU = 50`'dir; yükleme yalnızca gerçek kaydırma olaylarında tetiklenir (periyodik zamanlayıcı kullanılmaz).
 20. **Fiş listesi sorgusu:** Kasa/Banka/Cari gibi `fis_satirlari` ile filtreleyen listelerde `JOIN + DISTINCT` yazılmaz; `f.id IN (SELECT fis_id FROM fis_satirlari WHERE hesap_turu=... )` alt sorgusu tercih edilir (LIMIT öncesi satır şişkinliği/tekilleştirme maliyeti oluşmaz).
 21. **Raporlar lazy yüklenir:** `RaporlarModulu` notebook sekmelerini ilk tıklamada oluşturur; rapor verisi yine yalnızca "Listele / Raporu Getir" ile doldurulur.
+22. **Rapor grupları tek ana sekme altında:** Aynı konudaki raporlar (Stok, ileride Cari/Kasa/Banka…) `*_raporlari_view.py` dosyasında **iç notebook** altında toplanır; ana notebook'ta tek sekme olarak görünür. İç sekmeler de temeldir ve `<<NotebookTabChanged>>` işleyicisi `if event.widget is not self.notebook: return` ile kendi olayını süzer (iç içe notebook'ta üst notebook'un yanlış tetiklenmesini engeller).
+23. **Rapor ortak taban sınıfı:** Bir grubun raporları filtre satırını tekrar yazmaz; `stok_rapor_tabani.StokRaporTabani` deseni gibi tek taban sınıftan türetılır (filtre alanları + `stok_sartlari()`/`tarih_araligi()`/`limit()` + Treeview kurulumu + Excel/PDF). Alt sınıf yalnızca `RAPOR_ADI`, `KOLONLAR` ve `listele()` yazar. Hesaplamalar `core/services.py`'de ortak servis olarak durur (`stok_donem_ozeti`, `stok_donem_cogs`); rapor dosyalarında SQL çoğaltılmaz. **Liste üreten raporlarda kart arama/lookup alanı kullanılmaz** — çıktı zaten sıralı liste olduğundan tek ürün istenirse ekstre sekmesine bakılır (lookup yalnızca ekstre gibi tek hesap seçimi zorunlu ekranlarda).
 
 ---
 
@@ -612,7 +651,7 @@ Tamamlanan modüller:
 - Çek/Senet (manuel + Excel import – Giriş ve Açılış)
 - Tanımlar (manuel + Excel import – Cari, Stok, Hizmet, Kasa, Banka)
 - Ayarlar (Firma Tanımları, Yıl Tanımları, çalışma sırasında firma/yıl değiştirme)
-- Raporlar (Stok Durum, Stok/Cari/Kasa/Banka Ekstre, Hizmet Kartları + Detay, Çek/Senet Raporları, KDV Raporu, Cari Bakiyeleri, **Kar/Zarar Raporu** — Aylık/Yıllık)
+- Raporlar (**Stok Raporları** ana sekmesi: Stok Durum, Stok Ekstresi, En Çok Satan, Az Satan, Hiç Satış Yapmayan, En Çok Hareket Gören, Kârlılık), Cari/Kasa/Banka Ekstre, Hizmet Kartları + Detay, Çek/Senet Raporları, KDV Raporu, Cari Bakiyeleri, **Kar/Zarar Raporu** — Aylık/Yıllık)
 
 Tamamlanan sistemler:
 - **KDV modeli**: 191 İndirilecek / 391 Hesaplanan KDV hesapları otomatik oluşturulur;
@@ -629,11 +668,18 @@ Tamamlanan sistemler:
 - **Kar/Zarar Raporu**: Satış Raporu yeniden adlandırıldı; **Aylık** (mevcut detay) ve **Yıllık** (12 ay 6+6 grid + genel toplamlar) sekmeleri eklendi.
 - **Veri bütünlüğü**: Fiş no tekrar kontrolü, kart tablosu whitelist (SQL enjeksiyon koruması), KDV'de Decimal + ROUND_HALF_UP ticari yuvarlama, `PRAGMA foreign_keys=ON` + CASCADE silme.
 - **KDV Raporu**: 191/391 hareketleri, aylık alt toplamlar ve "Ödenecek/Devreden KDV (391 − 191)" farkı.
+- **Stok raporları tek ana sekme altında + 4 yeni stok raporu**: Raporlar notebook'undaki *Stok Durum Raporu* ve *Stok Ekstresi* sekmeleri **Stok Raporları** ana sekmesinin içine (tembel alt sekmeler) alındı; aynı yere **En Çok Satan**, **Az Satan**, **Hiç Satış Yapmayan**, **En Çok Hareket Gören** ve **Kârlılık** raporları eklendi. Ortak altyapı: `stok_rapor_tabani.StokRaporTabani` (tarih aralığı + kategori + durum + limit filtreleri, Excel/PDF; kart arama alanı bilinçli olarak yok). Ortak veri servisi: `core/services.py` → `stok_donem_ozeti()` (fiş türü bazında dönem özeti: hareket sayısı, alış/satış/iade/fire miktar ve tutarları, işlem hacmi, son hareket) ve `stok_donem_cogs()` (kart bazında FIFO maliyet; Kar/Zarar raporundaki FIFO mantığıyla aynı, sadece satış faturası çıkışları). Kâr = net satış tutarı − FIFO maliyet; marj %'si ve TOPLAM satırı raporun altında.
+- **Stok listesi performansı + ortak stok servisi**: Tanımlar → Stok Kartları listesi artık yalnızca `stoklar` tablosunu çekiyor (miktar/maliyet sütunleri ve her aramada çalışan iki `fis_satirlari` tam taraması + FIFO döngüsü kaldırıldı). Bakiye + FIFO kalan maliyet hesabı tek kaynakta: `core/services.py` → `stok_bakiye_ve_maliyet()`; Stok Durum Raporu ve Giriş dashboard'u bu servisi kullanıyor (kopya bloklar silindi).
 
 Uygulama, tek kullanıcılı yerel ön muhasebe işlemlerini fiş bazlı olarak yönetebilecek durumdadır.
 Tüm modüller Excel import desteğine sahiptir.
 
 **Bekleyen özellikler (detay için `plan.md`):**
 - Hesap Taşı (Hizmet Kartları): sağ tık → kayıtları aynı türdeki başka karta taşıma (opsiyonel tarih aralığı).
+- **Refaktoring backlog** (tekrar taraması 30.08.2026 — `plan.md` 🔵): Excel import
+  yardımcıları (`_metin`/`_sayi`/`_tarih` + kart aramaları) → `utils/import_helpers.py`;
+  işlem liste ekranları → `FisListeMixin`; ölü dosya `stok_raporu_view.py` temizliği.
+  **İşlem formları (kasa/banka/cari/fatura/çek-senet `_form.py`) bilerek ayrı tutuluyor — birleştirme kapsamı dışı.**
 - İsteğe bağlı: "Kayıt Et" tıklanırken açık satır düzenlemesinin otomatik onaylanması; Çek/Senet kolonu için satır içi seçim.
-- `docs/laravel/` altında Laravel + Vue + Inertia web geçiş planı ayrıca hazırlanmıştır (bu dokümanın kapsamı dışında).
+- Web geçişi (Laravel 13 + Inertia + Vue) **`C:\Users\mehme\Herd\onmuhasebe\docs\GECIS_PLANI.md`** dosyasında
+  yürüyor (Faz 0 kabuğu kuruldu). Bu dokümanın kapsamı dışında; eski taslak set `docs/laravel/` altında arşivdir.

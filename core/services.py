@@ -273,6 +273,189 @@ def kaydet_kart(cursor, tablo_adi, veri_sozlugu):
 
 
 
+# ---------------------------------------------------------------- Stok yardımcıları
+def stok_bakiye_ve_maliyet(cursor, firma_id):
+    """
+    Firmanın stok kartları için mevcut miktar (bakiye) ve FIFO kalan maliyet
+    değerlerini hesaplar.
+
+    Dönüş: (bakiyeler, maliyetler) — her ikisi de {stok_id: değer} sözlüğü.
+
+    NOT: fis_satirlari üzerinde tam tarama + Python'da FIFO döngüsü gerektirir.
+    Bu yüzden yalnızca bu verilere gerçekten ihtiyaç duyan raporlarda
+    kullanılmalı; tanım listelerinde (stok kartları) çalıştırılmamalıdır.
+    """
+    # 1. Bakiyeler: borç stok giriş, alacak stok çıkış sayılır
+    cursor.execute("""
+        SELECT hesap_id,
+               SUM(CASE WHEN borc > 0 THEN miktar WHEN alacak > 0 THEN -miktar ELSE 0 END)
+        FROM fis_satirlari
+        WHERE hesap_turu = 'Stok' AND firma_id = ?
+        GROUP BY hesap_id
+    """, (firma_id,))
+    bakiyeler = {row[0]: row[1] or 0.0 for row in cursor.fetchall()}
+
+    # 2. FIFO kalan maliyet: en yeni alışlardan başlayarak kalan miktarı doldur
+    cursor.execute("""
+        SELECT fs.hesap_id, fs.miktar, fs.birim_fiyat
+        FROM fis_satirlari fs
+        JOIN fisler f ON f.id = fs.fis_id
+        WHERE fs.hesap_turu = 'Stok' AND fs.borc > 0 AND fs.firma_id = ?
+        ORDER BY f.tarih DESC, f.id DESC
+    """, (firma_id,))
+    maliyetler = {stok_id: 0.0 for stok_id in bakiyeler}
+    kalan_miktarlar = bakiyeler.copy()
+    for stok_id, miktar, birim_fiyat in cursor.fetchall():
+        if kalan_miktarlar.get(stok_id, 0) > 0:
+            kullanilacak = min(kalan_miktarlar[stok_id], miktar)
+            maliyetler[stok_id] += kullanilacak * (birim_fiyat or 0)
+            kalan_miktarlar[stok_id] -= kullanilacak
+
+    return bakiyeler, maliyetler
+
+
+# ------------------------------------------------- Stok rapor yardımcıları
+# Fiş türü sabitleri: stok hareketlerinin sınıflandırmasında kullanılır.
+STOK_SATIS_TURU = "Satış Faturası"
+STOK_SATIS_IADE_TURU = "Satış İade Faturası"
+STOK_ALIS_TURU = "Alış Faturası"
+STOK_ALIS_IADE_TURU = "Alış İade Faturası"
+STOK_FIRE_TURU = "Fire Fişi"
+
+# stok_donem_ozeti dönüş sözlüğündeki anahtarlar (varsayılan 0.0 için kullanılır)
+STOK_OZET_ALANLARI = (
+    "hareket_sayisi", "son_hareket_tarihi",
+    "alis_miktar", "alis_tutar",
+    "satis_miktar", "satis_tutar",
+    "satis_iade_miktar", "satis_iade_tutar",
+    "alis_iade_miktar", "alis_iade_tutar",
+    "fire_miktar", "diger_giris_miktar", "diger_cikis_miktar",
+    "giris_miktar", "cikis_miktar", "islem_tutar",
+)
+
+
+def stok_donem_ozeti(cursor, firma_id, bas_tarih=None, bit_tarih=None):
+    """
+    Stok kartlarının dönem bazlı hareket özeti (raporlar için ortak sorgu).
+
+    Dönüş: {stok_id: {alan: değer}} — alanlar STOK_OZET_ALANLARI içindedir.
+    bas_tarih veya bit_tarih None verilirse o uçtan filtre uygulanmaz (tüm dönem).
+
+    Tutarlar KDV hariç, miktar × birim_fiyat üzerinden hesaplanır
+    (miktar elle düzeltildiğinde raporun da güncel kalması için).
+    """
+    sartlar = ["fs.hesap_turu = 'Stok'", "fs.firma_id = ?"]
+    params = [firma_id]
+    if bas_tarih:
+        sartlar.append("f.tarih >= ?")
+        params.append(bas_tarih)
+    if bit_tarih:
+        sartlar.append("f.tarih <= ?")
+        params.append(bit_tarih)
+
+    cursor.execute(f"""
+        SELECT fs.hesap_id,
+               COUNT(*),
+               MAX(f.tarih),
+               SUM(CASE WHEN f.fis_turu = '{STOK_ALIS_TURU}' THEN fs.miktar * fs.birim_fiyat ELSE 0 END),
+               SUM(CASE WHEN f.fis_turu = '{STOK_SATIS_TURU}' THEN fs.miktar ELSE 0 END),
+               SUM(CASE WHEN f.fis_turu = '{STOK_SATIS_TURU}' THEN fs.miktar * fs.birim_fiyat ELSE 0 END),
+               SUM(CASE WHEN f.fis_turu = '{STOK_SATIS_IADE_TURU}' THEN fs.miktar ELSE 0 END),
+               SUM(CASE WHEN f.fis_turu = '{STOK_SATIS_IADE_TURU}' THEN fs.miktar * fs.birim_fiyat ELSE 0 END),
+               SUM(CASE WHEN f.fis_turu = '{STOK_ALIS_IADE_TURU}' THEN fs.miktar ELSE 0 END),
+               SUM(CASE WHEN f.fis_turu = '{STOK_FIRE_TURU}' THEN fs.miktar ELSE 0 END),
+               SUM(CASE WHEN fs.borc > 0 AND f.fis_turu NOT IN ('{STOK_ALIS_TURU}', '{STOK_SATIS_IADE_TURU}')
+                        THEN fs.miktar ELSE 0 END),
+               SUM(CASE WHEN fs.alacak > 0 AND f.fis_turu NOT IN ('{STOK_SATIS_TURU}', '{STOK_ALIS_IADE_TURU}', '{STOK_FIRE_TURU}')
+                        THEN fs.miktar ELSE 0 END),
+               SUM(CASE WHEN fs.borc > 0 THEN fs.miktar ELSE 0 END),
+               SUM(CASE WHEN fs.alacak > 0 THEN fs.miktar ELSE 0 END),
+               SUM(fs.miktar * fs.birim_fiyat),
+               SUM(CASE WHEN f.fis_turu = '{STOK_ALIS_TURU}' THEN fs.miktar ELSE 0 END)
+        FROM fis_satirlari fs
+        JOIN fisler f ON f.id = fs.fis_id
+        WHERE {' AND '.join(sartlar)}
+        GROUP BY fs.hesap_id
+    """, params)
+
+    ozet = {}
+    for satir in cursor.fetchall():
+        hesap_id = satir[0]
+        ozet[hesap_id] = {
+            "hareket_sayisi": satir[1] or 0,
+            "son_hareket_tarihi": satir[2] or "",
+            "alis_tutar": satir[3] or 0.0,
+            "satis_miktar": satir[4] or 0.0,
+            "satis_tutar": satir[5] or 0.0,
+            "satis_iade_miktar": satir[6] or 0.0,
+            "satis_iade_tutar": satir[7] or 0.0,
+            "alis_iade_miktar": satir[8] or 0.0,
+            "fire_miktar": satir[9] or 0.0,
+            "diger_giris_miktar": satir[10] or 0.0,
+            "diger_cikis_miktar": satir[11] or 0.0,
+            "giris_miktar": satir[12] or 0.0,
+            "cikis_miktar": satir[13] or 0.0,
+            "islem_tutar": satir[14] or 0.0,
+            "alis_miktar": satir[15] or 0.0,
+        }
+    return ozet
+
+
+def stok_ozet_getir(ozet, stok_id):
+    """Özet sözlüğünden kart verisini döndürür; hareket yoksa tüm alanlar 0."""
+    veri = ozet.get(stok_id)
+    if veri:
+        return veri
+    return {alan: ("" if alan == "son_hareket_tarihi" else 0.0) for alan in STOK_OZET_ALANLARI}
+
+
+def stok_donem_cogs(cursor, firma_id, bas_tarih, bit_tarih, fis_turleri=(STOK_SATIS_TURU,)):
+    """
+    Dönem içindeki stok çıkışlarının FIFO maliyetini kart bazında hesaplar.
+
+    Katmanlar dönem başından önceki hareketleri de içerir (tüm geçmiş yeniden
+    oynatılır); yalnızca [bas_tarih, bit_tarih] aralığında ve fis_turleri ile
+    eşleşen çıkışların maliyeti toplama eklenir.
+
+    Dönüş: {stok_id: maliyet_toplamı}
+    """
+    cursor.execute("""
+        SELECT f.tarih, f.fis_turu, fs.hesap_id, fs.miktar, fs.birim_fiyat, fs.borc, fs.alacak
+        FROM fis_satirlari fs
+        JOIN fisler f ON f.id = fs.fis_id
+        WHERE fs.hesap_turu = 'Stok' AND fs.firma_id = ? AND f.tarih <= ?
+        ORDER BY f.tarih, f.id
+    """, (firma_id, bit_tarih))
+
+    katmanlar = {}
+    cogs = {}
+    for tarih, fis_turu, hesap_id, miktar, birim_fiyat, borc, alacak in cursor.fetchall():
+        katman = katmanlar.setdefault(hesap_id, [])
+        if borc and borc > 0:
+            katman.append([miktar or 0.0, birim_fiyat or 0.0])
+        elif alacak and alacak > 0:
+            maliyet = _fifo_tuket(katman, miktar or 0.0)
+            if fis_turleri is None or fis_turu in fis_turleri:
+                if not bas_tarih or tarih >= bas_tarih:
+                    cogs[hesap_id] = cogs.get(hesap_id, 0.0) + maliyet
+    return cogs
+
+
+def _fifo_tuket(katmanlar, miktar):
+    """FIFO kuyruğundan miktar kadar tüketir ve tüketilen maliyeti döndürür."""
+    kalan = miktar
+    toplam = 0.0
+    while kalan > 0 and katmanlar:
+        katman = katmanlar[0]
+        kullanilacak = min(kalan, katman[0])
+        toplam += kullanilacak * katman[1]
+        katman[0] -= kullanilacak
+        kalan -= kullanilacak
+        if katman[0] <= 0:
+            katmanlar.pop(0)
+    return toplam
+
+
 # ---------------------------------------------------------------- KDV yardımcılar
 def aktif_yil_kontrolu(tarih_nesnesi, aktif_yil):
     """

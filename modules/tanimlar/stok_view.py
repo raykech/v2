@@ -3,7 +3,7 @@ from tkinter import ttk, messagebox
 import sqlite3
 from core.db import veritabani_baglan
 from core.services import kart_sil as kart_sil_service, kaydet_kart
-from utils.formatters import format_currency, parse_currency, format_miktar
+from utils.formatters import format_currency, parse_currency
 from utils.export import export_treeview_data
 from ui.widgets.lookup_widget import LookupWidget
 from ui.dialogs import ac_kart_dialog
@@ -118,7 +118,7 @@ class StokTanimView(SayfaliListeMixin, tk.Frame):
         tree_container = tk.Frame(liste_frame)
         tree_container.pack(fill="both", expand=True)
 
-        self.tree = ttk.Treeview(tree_container, columns=("id", "stok_kodu", "stok_adi", "kategori", "birim", "kdv_oran", "mevcut_miktar", "kalan_maliyet", "alis_fiyati", "satis_fiyati"), show="headings")
+        self.tree = ttk.Treeview(tree_container, columns=("id", "stok_kodu", "stok_adi", "kategori", "birim", "kdv_oran", "alis_fiyati", "satis_fiyati"), show="headings")
         
         self.tree.heading("id", text="ID")
         self.tree.heading("stok_kodu", text="Stok Kodu")
@@ -126,8 +126,6 @@ class StokTanimView(SayfaliListeMixin, tk.Frame):
         self.tree.heading("kategori", text="Kategori")
         self.tree.heading("birim", text="Birim")
         self.tree.heading("kdv_oran", text="KDV %", anchor="e")
-        self.tree.heading("mevcut_miktar", text="Mevcut Miktar", anchor="e")
-        self.tree.heading("kalan_maliyet", text="Maliyet Değeri", anchor="e")
         self.tree.heading("alis_fiyati", text="Alış Fiyatı", anchor="e")
         self.tree.heading("satis_fiyati", text="Satış Fiyatı", anchor="e")
 
@@ -137,8 +135,6 @@ class StokTanimView(SayfaliListeMixin, tk.Frame):
         self.tree.column("kategori", width=120, stretch=False)
         self.tree.column("birim", width=80, stretch=False)
         self.tree.column("kdv_oran", width=80, stretch=False, anchor="e")
-        self.tree.column("mevcut_miktar", width=100, stretch=False, anchor="e")
-        self.tree.column("kalan_maliyet", width=100, stretch=False, anchor="e")
         self.tree.column("alis_fiyati", width=100, stretch=False, anchor="e")
         self.tree.column("satis_fiyati", width=100, stretch=False, anchor="e")
 
@@ -150,7 +146,6 @@ class StokTanimView(SayfaliListeMixin, tk.Frame):
         self.tree.pack(side="left", fill="both", expand=True)
 
         self.tree.bind("<<TreeviewSelect>>", self.kayit_secildi)
-        self.tree.tag_configure('low_stock', foreground='red')
         self.tree.tag_configure('passive', foreground='gray')
         self._init_sayfalama(self.tree)
 
@@ -212,8 +207,6 @@ class StokTanimView(SayfaliListeMixin, tk.Frame):
             self.tree.delete(i)
         self._sayfa_yuklenen = 0
         self._sayfa_tukendi = False
-        self._stok_bakiyeleri = {}
-        self._stok_maliyetleri = {}
         conn = None
         try:
             conn = veritabani_baglan()
@@ -223,42 +216,9 @@ class StokTanimView(SayfaliListeMixin, tk.Frame):
             secili_kategori = self.cmb_kategori_filtre.get()
             secili_durum = self.cmb_durum_filtre.get()
 
-            # 1. Stok bakiyelerini hesapla
-            cursor.execute("""
-                SELECT 
-                    fs.hesap_id, 
-                    SUM(CASE WHEN fs.borc > 0 THEN fs.miktar WHEN fs.alacak > 0 THEN -fs.miktar ELSE 0 END) as bakiye
-                FROM fis_satirlari fs
-                JOIN fisler f ON f.id = fs.fis_id
-                WHERE fs.hesap_turu = 'Stok' AND fs.firma_id = ?
-                GROUP BY fs.hesap_id
-            """, (self.main_app.aktif_firma_id,))
-            self._stok_bakiyeleri = {row[0]: row[1] for row in cursor.fetchall()}
-
-            # 2. FIFO Maliyetlerini hesaplamak için tüm alışları al
-            cursor.execute("""
-                SELECT
-                    fs.hesap_id,
-                    fs.miktar,
-                    fs.birim_fiyat
-                FROM fis_satirlari fs
-                JOIN fisler f ON f.id = fs.fis_id
-                WHERE fs.hesap_turu = 'Stok' AND fs.borc > 0 AND fs.firma_id = ?
-                ORDER BY f.tarih DESC, f.id DESC
-            """, (self.main_app.aktif_firma_id,))
-            purchase_transactions = cursor.fetchall()
-
-            stock_costs = {sid: 0.0 for sid in self._stok_bakiyeleri}
-            remaining_quantities = self._stok_bakiyeleri.copy()
-
-            for stok_id, purchase_qty, unit_price in purchase_transactions:
-                if stok_id in remaining_quantities and remaining_quantities[stok_id] > 0:
-                    qty_to_use = min(remaining_quantities[stok_id], purchase_qty)
-                    stock_costs[stok_id] += qty_to_use * unit_price
-                    remaining_quantities[stok_id] -= qty_to_use
-            self._stok_maliyetleri = stock_costs
-
-            # 3. Stok kartlarını al
+            # Stok kartlarını al (miktar/maliyet hesabı bilinçli olarak burada
+            # yapılmaz; hareket tablosunda tam tarama gerektirir. Raporlar
+            # core.services.stok_bakiye_ve_maliyet üzerinden kendileri hesaplar.)
             where_clauses = ["firma_id=?"]
             params = [self.main_app.aktif_firma_id]
 
@@ -274,7 +234,7 @@ class StokTanimView(SayfaliListeMixin, tk.Frame):
                 where_clauses.append("(stok_adi LIKE ? OR stok_kodu LIKE ?)")
                 params.extend([f"%{arama_metni}%", f"%{arama_metni}%"])
 
-            self._sayfa_query = "SELECT id, stok_kodu, stok_adi, kategori, birim, alis_fiyati, satis_fiyati, durum, kritik_miktar, kdv_oran FROM stoklar"
+            self._sayfa_query = "SELECT id, stok_kodu, stok_adi, kategori, birim, alis_fiyati, satis_fiyati, durum, kdv_oran FROM stoklar"
             if where_clauses: self._sayfa_query += " WHERE " + " AND ".join(where_clauses)
             self._sayfa_query += " ORDER BY id DESC"
             self._sayfa_params = params
@@ -286,17 +246,12 @@ class StokTanimView(SayfaliListeMixin, tk.Frame):
 
     def _satirlari_ekle(self, rows):
         for stok in rows:
-            stok_id, stok_kodu, stok_adi, kategori, birim, alis_fiyati, satis_fiyati, durum, kritik_miktar, kdv_oran = stok
-            mevcut_miktar = self._stok_bakiyeleri.get(stok_id, 0.0)
-            kalan_maliyet = self._stok_maliyetleri.get(stok_id, 0.0)
+            stok_id, stok_kodu, stok_adi, kategori, birim, alis_fiyati, satis_fiyati, durum, kdv_oran = stok
             tags = []
-            if mevcut_miktar <= kritik_miktar: tags.append('low_stock')
             if durum == 0: tags.append('passive')
             self.tree.insert("", "end", values=(
                 stok_id, stok_kodu, stok_adi, kategori, birim,
                 f"{kdv_oran or 0:g}",
-                format_miktar(mevcut_miktar),
-                format_currency(kalan_maliyet),
                 format_currency(alis_fiyati), format_currency(satis_fiyati)
             ), tags=tuple(tags))
 

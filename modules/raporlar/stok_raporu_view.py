@@ -1,6 +1,7 @@
 import tkinter as tk
 from tkinter import ttk, messagebox
 from core.db import veritabani_baglan
+from core.services import stok_bakiye_ve_maliyet
 from utils.formatters import format_currency, format_miktar
 
 class StokRaporuView(tk.Frame):
@@ -78,30 +79,8 @@ class StokRaporuView(tk.Frame):
             conn = veritabani_baglan()
             cursor = conn.cursor()
 
-            # 1. Stok bakiyelerini hesapla
-            cursor.execute("""
-                SELECT hesap_id, SUM(CASE WHEN borc > 0 THEN miktar WHEN alacak > 0 THEN -miktar ELSE 0 END)
-                FROM fis_satirlari WHERE hesap_turu = 'Stok' AND firma_id = ? GROUP BY hesap_id
-            """, (self.main_app.aktif_firma_id,))
-            stock_balances = {row[0]: row[1] for row in cursor.fetchall()}
-
-            # 2. FIFO Maliyetlerini hesapla
-            cursor.execute("""
-                SELECT fs.hesap_id, fs.miktar, fs.birim_fiyat FROM fis_satirlari fs
-                JOIN fisler f ON f.id = fs.fis_id
-                WHERE fs.hesap_turu = 'Stok' AND fs.borc > 0 AND fs.firma_id = ?
-                ORDER BY f.tarih DESC, f.id DESC
-            """, (self.main_app.aktif_firma_id,))
-            purchase_transactions = cursor.fetchall()
-            
-            stock_costs = {stok_id: 0.0 for stok_id in stock_balances}
-            remaining_quantities = stock_balances.copy()
-
-            for stok_id, purchase_qty, unit_price in purchase_transactions:
-                if stok_id in remaining_quantities and remaining_quantities[stok_id] > 0:
-                    qty_to_use = min(remaining_quantities[stok_id], purchase_qty)
-                    stock_costs[stok_id] += qty_to_use * unit_price
-                    remaining_quantities[stok_id] -= qty_to_use
+            # 1-2. Stok bakiye ve FIFO maliyet hesapları (ortak servis)
+            stock_balances, stock_costs = stok_bakiye_ve_maliyet(cursor, self.main_app.aktif_firma_id)
 
             # 3. Stok kartlarını filtreleyerek al
             where_clauses = ["firma_id=?"]
