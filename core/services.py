@@ -130,9 +130,13 @@ def fis_guncelle(cursor, fis_id, fis_baslik, fis_satirlari, pesin_odeme_data=Non
         """,
         fis_baslik
     )
+    # C6: başlık firma uyuşmazlığı/uyuşmazsa hiçbir satıra dokunmadan iptal
+    # (eskiden başlık dururken satırlar siliniyordu — kısmi düzenleme kapısı)
+    if cursor.rowcount == 0:
+        raise ValueError("Fiş bulunamadı (firma uyumsuzluğu) — güncelleme iptal edildi.")
 
-    # 2. Ana Fişin eski satırlarını temizle
-    cursor.execute("DELETE FROM fis_satirlari WHERE fis_id = ?", (fis_id,))
+    # 2. Ana Fişin eski satırlarını temizle (firma kapsamlı)
+    cursor.execute("DELETE FROM fis_satirlari WHERE fis_id = ? AND firma_id = ?", (fis_id, fis_baslik['firma_id']))
 
     # 3. Yeni/güncel ana fiş satırlarını ekle
     for satir in fis_satirlari:
@@ -146,11 +150,13 @@ def fis_guncelle(cursor, fis_id, fis_baslik, fis_satirlari, pesin_odeme_data=Non
             satir
         )
 
-    # 4. Eski peşin ödeme fişini sil (önce satırlarını açıkça temizle)
-    cursor.execute("SELECT id FROM fisler WHERE kaynak_fis_id = ?", (fis_id,))
-    for eski_fis_id in [r[0] for r in cursor.fetchall()]:
-        cursor.execute("DELETE FROM fis_satirlari WHERE fis_id = ?", (eski_fis_id,))
-    cursor.execute("DELETE FROM fisler WHERE kaynak_fis_id = ?", (fis_id,))
+    # 4. Eski peşin ödeme fişini sil (önce satırları ve C18 hareket kayıtları)
+    cursor.execute("SELECT id FROM fisler WHERE kaynak_fis_id = ? AND firma_id = ?", (fis_id, fis_baslik['firma_id']))
+    eski_ids = [r[0] for r in cursor.fetchall()]
+    for eski_fis_id in eski_ids:
+        cursor.execute("DELETE FROM fis_satirlari WHERE fis_id = ? AND firma_id = ?", (eski_fis_id, fis_baslik['firma_id']))
+        cursor.execute("DELETE FROM cek_senet_hareketleri WHERE fis_id = ?", (eski_fis_id,))
+    cursor.execute("DELETE FROM fisler WHERE kaynak_fis_id = ? AND firma_id = ?", (fis_id, fis_baslik['firma_id']))
 
     # 5. Yeni peşin ödeme fişini kaydet (varsa)
     if pesin_odeme_data:
@@ -194,6 +200,16 @@ def fis_sil(cursor, fis_id, firma_id):
             "DELETE FROM fis_satirlari WHERE fis_id = ? AND firma_id = ?",
             (bagli_fis[0], firma_id),
         )
+
+    # C18: fişin ürettiği çek/senet hareket kayıtları da silinir — aksi halde
+    # fis_id sarkan yetim hareket, durum zincirini (güncel durum / son hareket
+    # sorguları) sessizce bozar. Çek/Senet modülü kendi yolunu (cek_senet_fis_sil)
+    # kullanır; bu genel silme yolunun güvence katmanıdır.
+    silinecek_fis_ids = [fis_id] + ([bagli_fis[0]] if bagli_fis else [])
+    cursor.executemany(
+        "DELETE FROM cek_senet_hareketleri WHERE fis_id = ?",
+        [(fid,) for fid in silinecek_fis_ids],
+    )
 
     # Ana fişi sil
     cursor.execute("DELETE FROM fisler WHERE id = ? AND firma_id = ?", (fis_id, firma_id))

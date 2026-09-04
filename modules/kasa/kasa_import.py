@@ -53,92 +53,10 @@ KASA_IMPORT_KOLONLARI = [
 ZORUNLU_KOLONLAR = ["Fiş Türü", "Tarih", "Kasa / Ana Kasa"]
 
 
-def _metin(deger):
-    """Excel hücresini temiz metne çevirir. NaN/None ise boş string döner."""
-    if deger is None:
-        return ""
-    if isinstance(deger, float) and pd is not None and pd.isna(deger):
-        return ""
-    if isinstance(deger, str):
-        return deger.strip()
-    if isinstance(deger, (datetime, date)):
-        return deger.strftime("%d.%m.%Y")
-    return str(deger).strip()
 
 
-def _sayi(deger):
-    """Excel hücresini float'a çevirmeyi dener. Geçersizse None döner."""
-    if deger is None:
-        return None
-    if isinstance(deger, bool):
-        return None
-    if isinstance(deger, (int, float)):
-        if pd is not None and isinstance(deger, float) and pd.isna(deger):
-            return None
-        return float(deger)
 
-    s = str(deger).strip().replace(" ", "").replace("TL", "").replace("₺", "").replace("%", "")
-    if not s:
-        return None
-
-    # "1.234,56" -> "1234.56"
-    if "," in s and "." in s:
-        s = s.replace(".", "").replace(",", ".")
-        try:
-            return float(s)
-        except ValueError:
-            return None
-
-    # "1234,56" -> "1234.56"
-    if "," in s:
-        s = s.replace(".", "").replace(",", ".")
-        try:
-            return float(s)
-        except ValueError:
-            return None
-
-    # Nokta kullanımı: "1.234" binlik ayracı mı, "1234.56" ondalık mı?
-    # Excel sayısal hücrelerde bu sorun olmaz; metin girişlerinde en yaygın durumları destekleyelim.
-    if s.count(".") > 1:
-        s = s.replace(".", "")
-    elif s.count(".") == 1 and len(s.split(".")[1]) == 3:
-        # Türkçe binlik ayracı varsayımı: "1.000" -> 1000, "1.234" -> 1234
-        s = s.replace(".", "")
-
-    try:
-        return float(s)
-    except ValueError:
-        return None
-
-
-def _tarih(deger):
-    """Tarihi YYYY-MM-DD string'ine çevirir. Geçersizse None döner."""
-    if deger is None:
-        return None
-    if isinstance(deger, datetime):
-        return deger.strftime("%Y-%m-%d")
-    if isinstance(deger, date):
-        return deger.strftime("%Y-%m-%d")
-
-    s = str(deger).strip()
-    if not s:
-        return None
-
-    formatlar = [
-        "%d.%m.%Y",
-        "%d.%m.%y",
-        "%d/%m/%Y",
-        "%d/%m/%y",
-        "%Y-%m-%d",
-        "%Y/%m/%d",
-    ]
-    for fmt in formatlar:
-        try:
-            return datetime.strptime(s, fmt).strftime("%Y-%m-%d")
-        except ValueError:
-            continue
-    return None
-
+from utils.import_helpers import metin as _metin, sayi as _sayi, tarih as _tarih
 
 def kasa_ornek_excel_olustur(dosya_yolu):
     """Kasa importu için örnek Excel şablonu oluşturur."""

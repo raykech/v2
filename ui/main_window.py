@@ -16,6 +16,7 @@ from modules.ayarlar.ayarlar_view import AyarlarModulu
 from modules.giris.dashboard_view import GirisDashboardView
 from ui.widgets.tooltip import Tooltip
 from ui.dialogs import FirmaYilDialog
+from ui.dirty_guard import modul_formu_kirli_mi
 
 class AnaPencere(tk.Tk):
     def __init__(self, firma_id, firma_adi, yil):
@@ -50,19 +51,30 @@ class AnaPencere(tk.Tk):
         self.config(menu=menubar)
 
         dosya_menu = tk.Menu(menubar, tearoff=0)
-        dosya_menu.add_command(label="Çıkış", command=self.cikis_onayla)
+        dosya_menu.add_command(label="Çıkış", command=self.cikis_onayla, accelerator="Ctrl+Q")
         menubar.add_cascade(label="Dosya", menu=dosya_menu)
 
+        # U3: klavye kısayolları — Modüller menüsü + bind_all
+        kisayollar = {
+            "tanimlar": ("t", "Alt+T"), "kasa": ("k", "Alt+K"), "cari": ("c", "Alt+C"),
+            "fatura": ("f", "Alt+F"), "banka": ("b", "Alt+B"), "cek_senet": ("s", "Alt+S"),
+            "raporlar": ("r", "Alt+R"), "ayarlar": ("y", "Alt+Y"),
+        }
+
         moduller_menu = tk.Menu(menubar, tearoff=0)
-        moduller_menu.add_command(label="Tanımlar", command=lambda: self._modul_aci("tanimlar"))
-        moduller_menu.add_command(label="Kasa", command=lambda: self._modul_aci("kasa"))
-        moduller_menu.add_command(label="Cari", command=lambda: self._modul_aci("cari"))
-        moduller_menu.add_command(label="Raporlar", command=lambda: self._modul_aci("raporlar"))
-        moduller_menu.add_command(label="Fatura", command=lambda: self._modul_aci("fatura"))
-        moduller_menu.add_command(label="Banka", command=lambda: self._modul_aci("banka"))
-        moduller_menu.add_command(label="Çek/Senet", command=lambda: self._modul_aci("cek_senet"))
-        moduller_menu.add_command(label="Ayarlar", command=lambda: self._modul_aci("ayarlar"))
+        moduller_menu.add_command(label="Tanımlar", command=lambda: self._modul_aci("tanimlar"), accelerator=kisayollar["tanimlar"][1])
+        moduller_menu.add_command(label="Kasa", command=lambda: self._modul_aci("kasa"), accelerator=kisayollar["kasa"][1])
+        moduller_menu.add_command(label="Cari", command=lambda: self._modul_aci("cari"), accelerator=kisayollar["cari"][1])
+        moduller_menu.add_command(label="Raporlar", command=lambda: self._modul_aci("raporlar"), accelerator=kisayollar["raporlar"][1])
+        moduller_menu.add_command(label="Fatura", command=lambda: self._modul_aci("fatura"), accelerator=kisayollar["fatura"][1])
+        moduller_menu.add_command(label="Banka", command=lambda: self._modul_aci("banka"), accelerator=kisayollar["banka"][1])
+        moduller_menu.add_command(label="Çek/Senet", command=lambda: self._modul_aci("cek_senet"), accelerator=kisayollar["cek_senet"][1])
+        moduller_menu.add_command(label="Ayarlar", command=lambda: self._modul_aci("ayarlar"), accelerator=kisayollar["ayarlar"][1])
         menubar.add_cascade(label="Modüller", menu=moduller_menu)
+
+        for modul, (harf, _) in kisayollar.items():
+            self.bind_all(f"<Alt-{harf}>", lambda e, k=modul: self._modul_aci(k))
+        self.bind_all("<Control-q>", lambda e: self.cikis_onayla())
 
     def _modul_butonlari_olustur(self):
         panel = tk.Frame(self, bg="#ffffff", padx=16, pady=14)
@@ -139,6 +151,11 @@ class AnaPencere(tk.Tk):
         if yeni_firma_id == self.aktif_firma_id and yeni_yil == self.aktif_yil:
             return
 
+        # U2: açık ve kirli fiş formları varsa önce sor — değişimi uygulama
+        kirli = self._kirli_form_var_mi(exclude_keys=("giris",))
+        if kirli and not self._kirli_onay(kirli, eylem="firma/yıl değiştirmek"):
+            return
+
         self.aktif_firma_id = yeni_firma_id
         self.aktif_firma_adi = yeni_firma_adi
         self.aktif_yil = yeni_yil
@@ -150,7 +167,7 @@ class AnaPencere(tk.Tk):
         # Tüm açık sekmeleri kapat; yeni firma/yıl ile modüller temiz açılsın
         for key in list(self.open_tabs.keys()):
             if key != "giris":
-                self._tab_kapat(key)
+                self._tab_kapat(key, soru=False)  # onay yukarıda toplu alındı
         self._tab_sec("giris")
 
     def _modul_aci(self, modul_key):
@@ -316,11 +333,38 @@ class AnaPencere(tk.Tk):
                 if tab_label: tab_label.config(bg="#d7e8ff", fg="#0d6efd")
                 if close_btn: close_btn.config(bg="#d7e8ff", fg="#0d6efd")
 
-    def _tab_kapat(self, modul_key):
+    def _kirli_form_var_mi(self, exclude_keys=()):
+        """Açık sekmelerde kaydedilmemiş fişi olan modül var mı? (U2)
+        Dönüş: kirli modül anahtar listesi."""
+        kirli = []
+        for key, data in self.open_tabs.items():
+            if key in exclude_keys:
+                continue
+            mod = data.get("module_instance")
+            if mod is not None and modul_formu_kirli_mi(mod):
+                kirli.append(key)
+        return kirli
+
+    def _kirli_onay(self, kirli_keys, eylem="kapatmak"):
+        """Kirli modüller için tek onay. Dönüş: devam edilsin mi?"""
+        if not kirli_keys:
+            return True
+        adlar = ", ".join(self.module_buttons.get(k, k) for k in kirli_keys)
+        return messagebox.askyesno(
+            "Kaydedilmemiş Değişiklikler",
+            f"Aktif fiş formlarında kaydedilmemiş değişiklikler var: {adlar}.\n\n"
+            f"Yine de devam edilsin mi? (Değişiklikler kaybolacak)",
+            parent=self,
+        )
+
+    def _tab_kapat(self, modul_key, soru=True):
         if modul_key not in self.open_tabs:
-            return
+            return True
 
         data = self.open_tabs[modul_key]
+        if soru and modul_formu_kirli_mi(data.get("module_instance")):
+            if not self._kirli_onay([modul_key]):
+                return False
         data["frame"].destroy()
         data["tab_button"].destroy() # Konteyner çerçevesini yok et
         # İçindeki label ve button'lar da otomatik yok olur
@@ -333,6 +377,7 @@ class AnaPencere(tk.Tk):
                 # Kalan sekmelerden ilkini seç
                 first_key = next(iter(self.open_tabs))
                 self._tab_sec(first_key)
+        return True
 
     def go_to_module_and_select_fis(self, module_key, fis_id):
         # ... (Bu metodun içeriği zaten doğru, sadece _yeniden_yukle_aktif_modul'den ayrıştırıldı)
@@ -349,13 +394,17 @@ class AnaPencere(tk.Tk):
         module_instance = self.open_tabs[module_key]["module_instance"]
 
         # Hedef modülde açık bir form varsa kapat, böylece liste görünümünde seçim yapılabilsin
+        # U2: form kirliyse iptal() önce sorar; kullanıcı vazgeçerse gezinti iptal
         acik_form = getattr(module_instance, "form_instance", None)
         if acik_form is not None:
+            kapandi = True
             if hasattr(acik_form, "iptal"):
-                acik_form.iptal()
+                kapandi = acik_form.iptal() is not False
             elif hasattr(acik_form, "kapat"):
-                acik_form.kapat()
-            else:
+                kapandi = acik_form.kapat() is not False
+            if not kapandi:
+                return
+            if not hasattr(acik_form, "iptal") and not hasattr(acik_form, "kapat"):
                 acik_form.pack_forget()
                 module_instance.form_kapatildi()
                 module_instance.pack(fill="both", expand=True)
@@ -391,6 +440,11 @@ class AnaPencere(tk.Tk):
             print(f"'{self.active_tab_key}' modülü için yeniden yükleme bilgisi bulunamadı.")
             return
 
+        # U2: açık kirli form varken F5 reload state'i bozar — önce sor
+        if modul_formu_kirli_mi(self.open_tabs[self.active_tab_key].get("module_instance")):
+            if not self._kirli_onay([self.active_tab_key], eylem="modülü yeniden yüklemek"):
+                return
+
         print(f"'{self.active_tab_key}' modülü ve bağımlılıkları yeniden yükleniyor...")
         try:
             # Önce bağımlılıkları, sonra ana modülü yeniden yükle (ters sırada)
@@ -398,9 +452,9 @@ class AnaPencere(tk.Tk):
             for path in reversed(modul_info["dependencies"] + [modul_info["main_path"]]):
                 if path in sys.modules: # Sadece yüklü olanları yeniden yükle
                     importlib.reload(sys.modules[path])
-            
+
             # Aktif modülü kapatıp yeniden açarak arayüzü güncelleyin
-            self._tab_kapat(self.active_tab_key) # Mevcut sekmeyi kapat
+            self._tab_kapat(self.active_tab_key, soru=False) # Mevcut sekmeyi kapat
             self._modul_aci(self.active_tab_key) # Yeniden yüklenen modülü aç
             messagebox.showinfo("Yeniden Yükleme", f"'{self.active_tab_key}' modülü başarıyla yeniden yüklendi!", parent=self)
         except Exception as e:
@@ -408,7 +462,12 @@ class AnaPencere(tk.Tk):
             print(f"Hata: {e}")
 
     def cikis_onayla(self):
-        if messagebox.askyesno("Çıkış Onayı", "Uygulamadan çıkmak istediğinize emin misiniz?"):
+        # U2: açık kirli fiş formları varsa uyarıyı genişlet
+        kirli = self._kirli_form_var_mi()
+        soru = "Uygulamadan çıkmak istediğinize emin misiniz?"
+        if kirli and not self._kirli_onay(kirli, eylem="çıkmak"):
+            return
+        if messagebox.askyesno("Çıkış Onayı", soru):
             self.destroy()
 
     def yenile_aktif_modul(self):

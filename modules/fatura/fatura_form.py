@@ -7,6 +7,7 @@ from core.db import veritabani_baglan
 from core.services import fis_kaydet, fis_guncelle, kdv_satiri_olustur, aktif_yil_kontrolu
 from utils.formatters import format_currency, parse_currency, CurrencyFormatter, format_miktar, kdv_hesapla
 from utils.eksi_uyari import eksi_kontrol_ve_onayla
+from ui.dirty_guard import dirty_kur, anlik_yenile, iptal_onayla, yeni_fis_temel_sifirla
 from ui.widgets.lookup_widget import LookupWidget, LookupDialog
 from ui.widgets.editable_treeview import EditableTreeview
 from ui.dialogs import ac_kart_dialog
@@ -32,6 +33,10 @@ class FaturaFormu(tk.Frame):
         
         if self.fis_id:
             self.fis_verilerini_yukle()
+
+        # U2: kaydedilmemiş değişiklik takibi (temiz anlık durum kaydı)
+        dirty_kur(self, ["ent_tarih", "ent_fis_no", "ent_aciklama",
+                         "lookup_cari", "cmb_odeme_tipi", "lookup_odeme_hesap"], ("tree",))
 
     def create_widgets(self):
         # Ana Çerçeveler
@@ -221,6 +226,7 @@ class FaturaFormu(tk.Frame):
 
         # Alt Butonlar
         tk.Button(alt_buton_frame, text="Kaydet", command=self.kaydet, bg="#198754", fg="white", font=("Arial", 10, "bold"), width=15, height=2).pack(side="right", padx=(10, 0))
+        tk.Button(alt_buton_frame, text="Kaydet ve Yeni Fiş", command=lambda: self.kaydet(yeni_fis=True), bg="#0d6efd", fg="white", font=("Arial", 10, "bold"), width=15, height=2).pack(side="right", padx=(10, 0))
         tk.Button(alt_buton_frame, text="Kapat", command=self.kapat, bg="#6c757d", fg="white", font=("Arial", 10, "bold"), width=15, height=2).pack(side="right")
 
     def create_toplam_etiketi(self, parent, text, row, col, is_bold=False):
@@ -345,7 +351,8 @@ class FaturaFormu(tk.Frame):
             self.giris_satiri_hesapla()
 
         except Exception as e:
-            print(f"_on_hesap_select hatası: {e}")
+            # U9: sessiz konsola düşmek yerine kullanıcıya görünür hata
+            messagebox.showerror("Hesap Seçim Hatası", f"Hesap bilgisi alınamadı:\n{e}", parent=self)
 
     def ayarla_form_yapisi(self):
         if "Satış Faturası" in self.fis_turu:
@@ -710,7 +717,7 @@ class FaturaFormu(tk.Frame):
         self.lbl_kdv_toplam.config(text=format_currency(kdv_toplam))
         self.lbl_genel_toplam.config(text=format_currency(genel_toplam))
 
-    def kaydet(self):
+    def kaydet(self, yeni_fis=False):
         cari_id = self.lookup_cari.get()
         odeme_tipi = self.cmb_odeme_tipi.get()
 
@@ -838,8 +845,13 @@ class FaturaFormu(tk.Frame):
             else:
                 fis_kaydet(cursor, fis_data, fis_satirlari, pesin_odeme_data, kaynak_modul='Fatura')
             conn.commit()
-            messagebox.showinfo("Başarılı", "Fatura başarıyla kaydedildi.", parent=self)
-            self.kapat()
+            if yeni_fis:
+                self._yeni_fis_sifirla("Fatura kaydedildi — yeni fiş için form hazır.")
+                self.list_view.listele()
+            else:
+                messagebox.showinfo("Başarılı", "Fatura başarıyla kaydedildi.", parent=self)
+                anlik_yenile(self)  # U2: kayıt temizlendi
+                self.kapat()
         except Exception as e:
             if conn: conn.rollback()
             messagebox.showerror("Veritabanı Hatası", f"Kayıt sırasında bir hata oluştu:\n{e}", parent=self)
@@ -851,9 +863,10 @@ class FaturaFormu(tk.Frame):
         try:
             conn = veritabani_baglan()
             cursor = conn.cursor()
-            cursor.execute("SELECT * FROM fisler WHERE id=?", (self.fis_id,))
+            cursor.execute("SELECT * FROM fisler WHERE id=? AND firma_id=?",
+                           (self.fis_id, self.main_app.aktif_firma_id))
             fis_data = cursor.fetchone()
-            if not fis_data: 
+            if not fis_data:
                 messagebox.showerror("Hata", "Fatura bulunamadı.", parent=self)
                 self.kapat()
                 return
@@ -867,18 +880,22 @@ class FaturaFormu(tk.Frame):
             self.lookup_cari.set(fis_dict.get('cari_id'))
 
             if self.is_hizmet_faturasi:
-                join_table, join_col, birim_col = "hizmet_kartlari", "kart_adi", "'' as birim"
+                join_table, join_col, birim_expr = "hizmet_kartlari", "kart_adi", "''"
                 hesap_turu_filter = "Hizmet"
             else:
-                join_table, join_col, birim_col = "stoklar", "stok_adi", "s.birim"
+                join_table, join_col, birim_expr = "stoklar", "stok_adi", "s.birim"
                 hesap_turu_filter = "Stok"
 
+            # C6: JOIN firma kapsamlı (id çakışması yanlış firmaya bağlanmasın) ve
+            # LEFT JOIN — silinmiş kartı olan satırlar sessiz düşmesin (sil-yeniden-yaz
+            # yolunda kaybolmalarının önü kesilir)
             query = f"""
-                SELECT fs.*, s.{join_col} as hesap_adi, {birim_col} FROM fis_satirlari fs 
-                JOIN {join_table} s ON fs.hesap_id = s.id 
+                SELECT fs.*, COALESCE(s.{join_col}, '[Silinmiş Kart]') as hesap_adi, {birim_expr} as birim
+                FROM fis_satirlari fs
+                LEFT JOIN {join_table} s ON fs.hesap_id = s.id AND s.firma_id = ?
                 WHERE fs.fis_id=? AND fs.hesap_turu=?
             """
-            params = [self.fis_id, hesap_turu_filter]
+            params = [self.main_app.aktif_firma_id, self.fis_id, hesap_turu_filter]
 
             # KDV hesap satırlarını (191/391) normal satır listesine alma; kaydederken yeniden üretilir
             kdv_ids = [kid for kid in (self.indirilecek_kdv_id, self.hesaplanan_kdv_id) if kid]
@@ -910,17 +927,19 @@ class FaturaFormu(tk.Frame):
                     format_currency(kdv_tutar), format_currency(toplam_tutar), "❌"
                 ))
             
-            cursor.execute("SELECT * FROM fisler WHERE kaynak_fis_id=?", (self.fis_id,))
+            cursor.execute("SELECT * FROM fisler WHERE kaynak_fis_id=? AND firma_id=?",
+                           (self.fis_id, self.main_app.aktif_firma_id))
             odeme_fis = cursor.fetchone()
             if odeme_fis:
                 odeme_fis_dict = dict(zip([d[0] for d in cursor.description], odeme_fis))
                 odeme_tipi_str = odeme_fis_dict['fis_turu'].split('(')[-1].strip(')')
                 self.cmb_odeme_tipi.set(odeme_tipi_str)
                 self.odeme_tipi_degisti()
-                
+
                 cursor.execute("SELECT hesap_id FROM fis_satirlari WHERE fis_id=? AND hesap_turu != 'Cari'", (odeme_fis_dict['id'],))
-                odeme_hesap_id = cursor.fetchone()[0]
-                self.lookup_odeme_hesap.set(odeme_hesap_id)
+                odeme_hesap_row = cursor.fetchone()
+                if odeme_hesap_row:
+                    self.lookup_odeme_hesap.set(odeme_hesap_row[0])
 
             self.guncelle_toplamlari()
 
@@ -929,12 +948,26 @@ class FaturaFormu(tk.Frame):
         finally:
             if conn: conn.close()
 
+    def _yeni_fis_sifirla(self, basarili_mesaj=None):
+        """U1: Kaydet ve Yeni Fiş — formu boş yeni fatura moduna alır (tarih/cari/ödeme korunur)."""
+        yeni_fis_temel_sifirla(self)
+        self.giris_satirini_temizle()
+        self.guncelle_toplamlari()
+        anlik_yenile(self)
+        if hasattr(self.main_app, "durum_yaz"):
+            self.main_app.durum_yaz(basarili_mesaj or "Fatura kaydedildi — yeni fiş için form hazır.")
+        self.ent_fis_no.focus_set()
+
     def kapat(self):
+        # U2: kirlilik varsa önce sorar (iptal/kapat sözleşmesi bu formda destroy ile)
+        if not iptal_onayla(self):
+            return False
         self.destroy()
         self.list_view.pack(fill="both", expand=True)
         self.list_view.listele()
         if self.on_close:
             self.on_close()
+        return True
 
     def yenile(self):
         self.verileri_yukle()

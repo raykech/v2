@@ -39,6 +39,9 @@ class LookupDialog(tk.Toplevel):
         self.ent_search = tk.Entry(top_frame)
         self.ent_search.pack(side="left", fill="x", expand=True, padx=5)
         self.ent_search.bind("<KeyRelease>", self.search)
+        # U3: klavye akışı — Enter seç, Esc kapat, Ok ile ağaca geç
+        self.ent_search.bind("<Return>", self._klavye_sec_veya_gec)
+        self.ent_search.bind("<Down>", self._agaca_gec)
 
         tree_frame = tk.Frame(self)
         tree_frame.pack(fill="both", expand=True, padx=10, pady=5)
@@ -59,6 +62,9 @@ class LookupDialog(tk.Toplevel):
         scrollbar.pack(side="right", fill="y")
 
         self.tree.bind("<Double-1>", self.on_select)
+        self.tree.bind("<Return>", self.on_select)
+        self.bind("<Escape>", lambda e: self.destroy())  # U3: Esc ile kapat
+        self.protocol("WM_DELETE_WINDOW", self.destroy)
 
         bottom_frame = tk.Frame(self, pady=10)
         bottom_frame.pack(fill="x", padx=10)
@@ -114,6 +120,26 @@ class LookupDialog(tk.Toplevel):
 
     def search(self, event=None):
         self.populate_tree(self.ent_search.get())
+
+    def _agaca_gec(self, event=None):
+        """U3: arama kutusundan Ok ile sonuç listesine geç (ilk satır seçili)."""
+        ilk = self.tree.focus() or (self.tree.get_children() and self.tree.get_children()[0])
+        if ilk:
+            self.tree.focus(ilk)
+            self.tree.see(ilk)
+            self.tree.focus_set()
+
+    def _klavye_sec_veya_gec(self, event=None):
+        """U3: Enter — tek sonuç varsa onu seç, yoksa listeye geç/seçili satırı seç."""
+        cocuklar = self.tree.get_children()
+        if len(cocuklar) == 1:
+            self.tree.focus(cocuklar[0])
+            self.on_select()
+            return
+        if self.tree.focus():
+            self.on_select()
+            return
+        self._agaca_gec()
 
     def on_select(self, event=None):
         selected_item = self.tree.focus()

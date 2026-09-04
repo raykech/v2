@@ -9,6 +9,7 @@ from ui.widgets.lookup_widget import LookupWidget, LookupDialog
 from ui.widgets.editable_treeview import EditableTreeview
 from utils.formatters import CurrencyFormatter, parse_currency, format_miktar, kdv_hesapla
 from utils.eksi_uyari import eksi_kontrol_ve_onayla
+from ui.dirty_guard import dirty_kur, anlik_yenile, iptal_onayla, yeni_fis_temel_sifirla
 
 
 class BankaFisiFormu(tk.Frame):
@@ -48,6 +49,10 @@ class BankaFisiFormu(tk.Frame):
 
         if self.fis_id:
             self.load_fis_data()
+
+        # U2: kaydedilmemiş değişiklik takibi (temiz anlık durum kaydı)
+        dirty_kur(self, ["ent_tarih", "ent_fis_no", "ent_aciklama", "ent_virman_tutar",
+                         "lookup_ana_banka", "lookup_hedef_banka"], ("tree_satirlar",))
 
     def create_widgets(self):
         # Ana Çerçeveler
@@ -228,6 +233,13 @@ class BankaFisiFormu(tk.Frame):
             width=20
         )
         self.btn_kaydet.pack(side="right")
+
+        self.btn_kaydet_yeni = tk.Button(
+            alt_buton_frame, text="Kaydet ve Yeni Fiş",
+            command=lambda: self.fis_kaydet(yeni_fis=True),
+            bg="#0d6efd", fg="white", font=("Arial", 11, "bold"), height=2, width=20,
+        )
+        self.btn_kaydet_yeni.pack(side="right", padx=10)
 
         self.btn_iptal = tk.Button(
             alt_buton_frame,
@@ -508,7 +520,7 @@ class BankaFisiFormu(tk.Frame):
             self.tree_satirlar.delete(item_id_to_delete)
             del self.satirlar[item_id_to_delete]
         except KeyError:
-            print(f"Satır {item_id_to_delete} bulunamadı.")
+            pass  # satır zaten listeden düşmüş — sessizce yoksay
 
         self.guncelle_toplamlari()
 
@@ -616,7 +628,7 @@ class BankaFisiFormu(tk.Frame):
         self.lbl_ara_toplam.config(text=f"{ara_toplam:,.2f}".replace(",", "X").replace(".", ",").replace("X", "."))
         self.lbl_genel_toplam.config(text=f"{genel_toplam:,.2f}".replace(",", "X").replace(".", ",").replace("X", "."))
 
-    def fis_kaydet(self):
+    def fis_kaydet(self, yeni_fis=False):
         """Fişi kaydeder."""
         fis_turu = self.fis_turu
 
@@ -810,8 +822,12 @@ class BankaFisiFormu(tk.Frame):
                 mesaj = "Banka fişi başarıyla kaydedildi."
 
             conn.commit()
-            messagebox.showinfo("Başarılı", mesaj, parent=self)
-            self.iptal()
+            if yeni_fis:
+                self._yeni_fis_sifirla(mesaj)
+            else:
+                messagebox.showinfo("Başarılı", mesaj, parent=self)
+                anlik_yenile(self)  # U2: kayıt temizlendi
+                self.iptal()
             self.view_container.yenile()
         except Exception as e:
             if conn:
@@ -827,7 +843,8 @@ class BankaFisiFormu(tk.Frame):
             conn = veritabani_baglan()
             cursor = conn.cursor()
 
-            cursor.execute("SELECT * FROM fisler WHERE id=?", (self.fis_id,))
+            cursor.execute("SELECT * FROM fisler WHERE id=? AND firma_id=?",
+                           (self.fis_id, self.main_app.aktif_firma_id))
             baslik = cursor.fetchone()
             if not baslik:
                 messagebox.showerror("Hata", "Fiş bulunamadı.", parent=self)
@@ -918,12 +935,30 @@ class BankaFisiFormu(tk.Frame):
             messagebox.showerror("Veri Yükleme Hatası", f"Fiş bilgileri yüklenemedi: {e}", parent=self)
             self.iptal()
 
+    def _yeni_fis_sifirla(self, basarili_mesaj=None):
+        """U1: Kaydet ve Yeni Fiş — formu boş yeni fiş moduna alır (tarih/banka korunur)."""
+        yeni_fis_temel_sifirla(self)
+        self.ent_virman_tutar.delete(0, "end")
+        self.ent_satir_aciklama.delete(0, "end")
+        self.ent_miktar.delete(0, "end"); self.ent_miktar.insert(0, "1,00")
+        self.ent_birim_fiyat.delete(0, "end")
+        self.lookup_hesap.clear()
+        self.lbl_satir_toplam.config(text="0,00")
+        self.guncelle_toplamlari()
+        anlik_yenile(self)
+        if hasattr(self.main_app, "durum_yaz"):
+            self.main_app.durum_yaz(basarili_mesaj or "Fiş kaydedildi — yeni fiş için form hazır.")
+        self.ent_fis_no.focus_set()
+
     def iptal(self):
-        """Formu gizle ve liste görünümünü göster."""
+        """Formu gizle ve liste görünümünü göster. U2: kirlilik varsa önce sorar."""
+        if not iptal_onayla(self):
+            return False
         self.pack_forget()
         if self.on_close:
             self.on_close()
         self.view_container.pack(fill="both", expand=True)
+        return True
 
     def yenile(self):
         """Lookup verilerini yenile."""

@@ -7,6 +7,7 @@ from core.db import veritabani_baglan
 from core.services import fis_kaydet, fis_guncelle, aktif_yil_kontrolu
 from utils.formatters import format_currency, parse_currency, CurrencyFormatter
 from utils.eksi_uyari import eksi_kontrol_ve_onayla
+from ui.dirty_guard import dirty_kur, anlik_yenile, iptal_onayla, yeni_fis_temel_sifirla
 from ui.widgets.lookup_widget import LookupWidget, LookupDialog
 from ui.dialogs import ac_kart_dialog
 
@@ -29,6 +30,9 @@ class FaturaFireFormu(tk.Frame):
 
         if self.fis_id:
             self.fis_verilerini_yukle()
+
+        # U2: kaydedilmemiş değişiklik takibi (temiz anlık durum kaydı)
+        dirty_kur(self, ["ent_tarih", "ent_fis_no", "ent_aciklama", "lookup_gider"], ("tree",))
 
     def create_widgets(self):
         # Ana Çerçeveler
@@ -156,6 +160,7 @@ class FaturaFireFormu(tk.Frame):
 
         # Alt Butonlar
         tk.Button(alt_buton_frame, text="Kaydet", command=self.kaydet, bg="#198754", fg="white", font=("Arial", 10, "bold"), width=15, height=2).pack(side="right", padx=(10, 0))
+        tk.Button(alt_buton_frame, text="Kaydet ve Yeni Fiş", command=lambda: self.kaydet(yeni_fis=True), bg="#0d6efd", fg="white", font=("Arial", 10, "bold"), width=15, height=2).pack(side="right", padx=(10, 0))
         tk.Button(alt_buton_frame, text="Kapat", command=self.kapat, bg="#6c757d", fg="white", font=("Arial", 10, "bold"), width=15, height=2).pack(side="right")
 
         # Seçili odak
@@ -286,7 +291,7 @@ class FaturaFireFormu(tk.Frame):
         genel_toplam = sum(s['toplam_tutar'] for s in self.satirlar.values())
         self.lbl_genel_toplam.config(text=format_currency(genel_toplam))
 
-    def kaydet(self):
+    def kaydet(self, yeni_fis=False):
         gider_id = self.lookup_gider.get()
         if not gider_id:
             messagebox.showwarning("Uyarı", "Lütfen bir fire gider kartı seçin.", parent=self)
@@ -345,8 +350,13 @@ class FaturaFireFormu(tk.Frame):
             else:
                 fis_kaydet(cursor, fis_data, fis_satirlari, pesin_odeme_data=None, kaynak_modul='Fatura')
             conn.commit()
-            messagebox.showinfo("Başarılı", "Fire fişi başarıyla kaydedildi.", parent=self)
-            self.kapat()
+            if yeni_fis:
+                self._yeni_fis_sifirla("Fire fişi kaydedildi — yeni fiş için form hazır.")
+                self.list_view.listele()
+            else:
+                messagebox.showinfo("Başarılı", "Fire fişi başarıyla kaydedildi.", parent=self)
+                anlik_yenile(self)  # U2: kayıt temizlendi
+                self.kapat()
         except Exception as e:
             if conn:
                 conn.rollback()
@@ -360,7 +370,8 @@ class FaturaFireFormu(tk.Frame):
         try:
             conn = veritabani_baglan()
             cursor = conn.cursor()
-            cursor.execute("SELECT * FROM fisler WHERE id=?", (self.fis_id,))
+            cursor.execute("SELECT * FROM fisler WHERE id=? AND firma_id=?",
+                           (self.fis_id, self.main_app.aktif_firma_id))
             fis_data = cursor.fetchone()
             if not fis_data:
                 messagebox.showerror("Hata", "Fire fişi bulunamadı.", parent=self)
@@ -427,12 +438,30 @@ class FaturaFireFormu(tk.Frame):
             if conn:
                 conn.close()
 
+    def _yeni_fis_sifirla(self, basarili_mesaj=None):
+        """U1: Kaydet ve Yeni Fiş — formu boş yeni fiş moduna alır (tarih/gider kartı korunur)."""
+        yeni_fis_temel_sifirla(self)
+        self.ent_stok.clear()
+        self.ent_satir_aciklama.delete(0, "end")
+        self.ent_miktar.delete(0, "end"); self.ent_miktar.insert(0, "1,00")
+        self.ent_birim_fiyat.delete(0, "end")
+        self._satir_toplam_hesapla()
+        self.guncelle_toplamlari()
+        anlik_yenile(self)
+        if hasattr(self.main_app, "durum_yaz"):
+            self.main_app.durum_yaz(basarili_mesaj or "Fire fişi kaydedildi — yeni fiş için form hazır.")
+        self.ent_fis_no.focus_set()
+
     def kapat(self):
+        # U2: kirlilik varsa önce sorar
+        if not iptal_onayla(self):
+            return False
         self.destroy()
         self.list_view.pack(fill="both", expand=True)
         self.list_view.listele()
         if self.on_close:
             self.on_close()
+        return True
 
     def yenile(self):
         self.verileri_yukle()

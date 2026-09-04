@@ -55,74 +55,10 @@ FATURA_IMPORT_KOLONLARI = [
 ZORUNLU_KOLONLAR = ["Fiş Türü", "Tarih", "Stok/Hizmet Adı"]
 
 
-def _metin(deger):
-    if deger is None:
-        return ""
-    if isinstance(deger, float) and pd is not None and pd.isna(deger):
-        return ""
-    if isinstance(deger, str):
-        return deger.strip()
-    if isinstance(deger, (datetime, date)):
-        return deger.strftime("%d.%m.%Y")
-    return str(deger).strip()
 
 
-def _sayi(deger):
-    if deger is None:
-        return None
-    if isinstance(deger, bool):
-        return None
-    if isinstance(deger, (int, float)):
-        if pd is not None and isinstance(deger, float) and pd.isna(deger):
-            return None
-        return float(deger)
 
-    s = str(deger).strip().replace(" ", "").replace("TL", "").replace("₺", "").replace("%", "")
-    if not s:
-        return None
-
-    if "," in s and "." in s:
-        s = s.replace(".", "").replace(",", ".")
-        try:
-            return float(s)
-        except ValueError:
-            return None
-    if "," in s:
-        s = s.replace(".", "").replace(",", ".")
-        try:
-            return float(s)
-        except ValueError:
-            return None
-    if s.count(".") > 1:
-        s = s.replace(".", "")
-    elif s.count(".") == 1 and len(s.split(".")[1]) == 3:
-        s = s.replace(".", "")
-
-    try:
-        return float(s)
-    except ValueError:
-        return None
-
-
-def _tarih(deger):
-    if deger is None:
-        return None
-    if isinstance(deger, datetime):
-        return deger.strftime("%Y-%m-%d")
-    if isinstance(deger, date):
-        return deger.strftime("%Y-%m-%d")
-
-    s = str(deger).strip()
-    if not s:
-        return None
-
-    for fmt in ("%d.%m.%Y", "%d.%m.%y", "%d/%m/%Y", "%d/%m/%y", "%Y-%m-%d", "%Y/%m/%d"):
-        try:
-            return datetime.strptime(s, fmt).strftime("%Y-%m-%d")
-        except ValueError:
-            continue
-    return None
-
+from utils.import_helpers import metin as _metin, sayi as _sayi, tarih as _tarih, cari_id_bul as _cari_id_bul, stok_id_bul as _stok_id_bul, hizmet_id_bul as _hizmet_id_bul
 
 def fatura_ornek_excel_olustur(dosya_yolu):
     """Fatura importu için örnek Excel şablonu oluşturur."""
@@ -246,42 +182,7 @@ def fatura_excel_oku(dosya_yolu):
     return satirlar
 
 
-def _cari_id_bul(cursor, unvan, firma_id):
-    if not unvan:
-        return None
-    cursor.execute("SELECT id FROM cariler WHERE durum=1 AND firma_id=? AND unvan=?", (firma_id, unvan))
-    kayitlar = cursor.fetchall()
-    if not kayitlar:
-        return None
-    if len(kayitlar) > 1:
-        return "ambiguous"
-    return kayitlar[0][0]
 
-
-def _stok_id_bul(cursor, stok_adi, firma_id):
-    if not stok_adi:
-        return None
-    cursor.execute("SELECT id, kdv_oran FROM stoklar WHERE durum=1 AND firma_id=? AND stok_adi=?", (firma_id, stok_adi))
-    kayitlar = cursor.fetchall()
-    if not kayitlar:
-        return None
-    if len(kayitlar) > 1:
-        return "ambiguous"
-    return kayitlar[0][0]
-
-
-def _hizmet_id_bul(cursor, kart_adi, tur, firma_id):
-    if not kart_adi:
-        return None
-    cursor.execute("SELECT id, tur, kdv_oran FROM hizmet_kartlari WHERE durum=1 AND firma_id=? AND kart_adi=?", (firma_id, kart_adi))
-    kayitlar = cursor.fetchall()
-    if not kayitlar:
-        return None
-    if len(kayitlar) > 1:
-        return "ambiguous"
-    if kayitlar[0][1] != tur:
-        return "wrong_type"
-    return kayitlar[0][0]
 
 
 def _odeme_hesap_id_bul(cursor, hesap_adi, hesap_turu, firma_id):

@@ -17,11 +17,8 @@ class RaporlarModulu(tk.Frame):
 
         tablar = [
             ("Stok Raporları", "stok_raporlari"),
-            ("Cari Ekstre", "ekstre_Cari"),
-            ("Kasa Ekstresi", "ekstre_Kasa"),
-            ("Banka Ekstresi", "ekstre_Banka"),
-            ("Hizmet Kartları Raporu", "hizmet_kartlari"),
-            ("Hizmet Kartları Detay", "ekstre_Hizmet"),
+            ("Ekstre Raporları", "ekstre_grup"),
+            ("Hizmet Raporları", "hizmet_grup"),
             ("Çek/Senet Raporları", "cek_senet"),
             ("KDV Raporu", "kdv"),
             ("Cari Bakiyeleri", "cari_bakiye"),
@@ -70,13 +67,25 @@ class RaporlarModulu(tk.Frame):
         if tab_key == "stok_raporlari":
             from .stok_raporlari_view import StokRaporlariView
             return StokRaporlariView(parent, self.main_app)
-        elif tab_key.startswith("ekstre_"):
+        elif tab_key == "ekstre_grup":
+            # Rapor gruplaması: ekstre raporları tek ana sekme altında
             from .hesap_ekstresi_view import HesapEkstresiView
-            hesap_turu = tab_key.split("_", 1)[1]
-            return HesapEkstresiView(parent, self.main_app, hesap_turu=hesap_turu)
-        elif tab_key == "hizmet_kartlari":
+            from .alt_sekme_grubu import AltSekmeGrubu
+            sekmeler = [
+                ("Cari Ekstre", lambda p, m: HesapEkstresiView(p, m, hesap_turu="Cari")),
+                ("Kasa Ekstresi", lambda p, m: HesapEkstresiView(p, m, hesap_turu="Kasa")),
+                ("Banka Ekstresi", lambda p, m: HesapEkstresiView(p, m, hesap_turu="Banka")),
+            ]
+            return AltSekmeGrubu(parent, self.main_app, sekmeler)
+        elif tab_key == "hizmet_grup":
+            from .hesap_ekstresi_view import HesapEkstresiView
             from .hizmet_kartlari_raporu_view import HizmetKartlariRaporuView
-            return HizmetKartlariRaporuView(parent, self.main_app)
+            from .alt_sekme_grubu import AltSekmeGrubu
+            sekmeler = [
+                ("Hizmet Kartları Raporu", lambda p, m: HizmetKartlariRaporuView(p, m)),
+                ("Hizmet Kartları Detay", lambda p, m: HesapEkstresiView(p, m, hesap_turu="Hizmet")),
+            ]
+            return AltSekmeGrubu(parent, self.main_app, sekmeler)
         elif tab_key == "cek_senet":
             from .cek_senet_raporlari_view import CekSenetRaporlariView
             return CekSenetRaporlariView(parent, self.main_app)
@@ -95,4 +104,11 @@ class RaporlarModulu(tk.Frame):
         return None
 
     def yenile(self):
-        pass
+        """U6: görünen sekmenin yenile()'sına delege et (tembel sekme güvenliğiyle)."""
+        try:
+            baslik = self.notebook.tab(self.notebook.select(), "text")
+        except Exception:
+            return
+        bilgi = self._tabs.get(baslik)
+        if bilgi and bilgi[0] and hasattr(bilgi[1], "yenile"):
+            bilgi[1].yenile()

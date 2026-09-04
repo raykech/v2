@@ -72,9 +72,9 @@ Uygulamanın **mimari omurgası sağlam**: tek merkezi fiş servisi, tutarlı fi
 
 ## 🟠 CİDDİ — Mantık tutarsızlıkları
 
-### C1. ❓ Peşin/nakit fatura satışları cari bakiyeye hiç yansımıyor
+### C1. ✅ Karara bağlandı: Peşin/nakit fatura satışları cariye gitmeyecek (tasarım gereği)
 - `modules/fatura/fatura_form.py:763-785` (cari karşılık sadece Vadeli'de) → `modules/raporlar/cari_bakiye_raporu_view.py:107-110`
-- Raporlar sadece `hesap_turu='Cari'` satırlardan türetiyor; nakit/Banka/POS satışında Cari satırı yok → cari ekstrede görünmez. Tasarım tercihi olabilir ama kullanıcı "ekstresi eksik" olarak yaşar.
+- *(2026-09-04 kullanıcı kararı):* Nakit/peşin satışta cari satırı **bilinçli olarak üretilmiyor** — karşı taraf fişte doğrudan Kasa/Banka. Gerekçe: her nakit çalışan müşteri/tedarikçi için cari kart açmak pratik değil. Cari ekstrede görünmemesi eksik değil, tasarım. Kod değişikliği gerekmez (mevcut davranış kararıyla birebir).
 
 ### C2. ⬜ Alış iadeleri Satış Raporu'nda COGS'a giriyor
 - `modules/raporlar/satis_raporu_view.py:417-422` (`_cogs_hesapla` ay içindeki **tüm** `alacak>0` stok satırlarını maliyetliyor)
@@ -92,16 +92,24 @@ Uygulamanın **mimari omurgası sağlam**: tek merkezi fiş servisi, tutarlı fi
 - `core/services.py:298-312` (`stok_bakiye_ve_maliyet`, "en yeni alışlarla refill"), `core/services.py:412-441` (`stok_donem_cogs`, kronolojik replay), `modules/raporlar/hesap_ekstresi_view.py:282-333` (replay kopyası)
 - Oversell ve iade yoksa anlaşıyorlar; varsa Stok Durum ≠ Stok Ekstresi ≠ Kârlılık (aynı DB'de). K5 üçünden ikisini etkiliyor.
 
-### C6. ⬜ Tüm form düzenleme-yüklemeleri ham id ile, `firma_id` filtresiz
+### C6. ✅ Tüm form düzenleme-yüklemeleri `firma_id` kapsamlı
 - `kasa_form.py:830,845`; `banka_form.py:790,805`; `cari_form.py:666,676-679`; `fatura_form.py:839,897,905`; `cek_senet_form.py:1176,1189,1193,1215`; `acilis_form.py:442,452-455`; `kasa_view.py:453`
 - Bugün listeler kapsamlı olduğu için ulaşılamaz, ama tek bozuk id ile çapraz-firma fiş okuma kapısı. `fatura_form.py:861-865` ayrıca `stoklar/hizmet_kartlari` JOIN'inde firma filtresiz (id çakışması yanlış firmaya bağlar) ve INNER JOIN, durum=0 (silinmiş) stoğu olan satırları sessiz düşürür → sil-yaz'da kaybolur.
 - `core/services.py:111` — satır silme kapsamsız, başlık UPDATE'i (`:105`) firma istiyor: uyumsuzlukta satırlar gider, başlık durur (kısmi düzenleme, `rowcount` kontrolü yok — `services.py:101-111`).
 - `services.py:126,129` (`kaynak_fis_id` SELECT/DELETE) ve `:512-533` (çek/senet durum yardımcıları) firma'sız — global tekil id ile zararsız ama savunmasız desen.
 - `modules/cek_senet/cek_senet_form.py:1083-1101` — `UPDATE cekler_senetler ... WHERE id=?` firma korumasız.
+- **Düzeltme (2026-09-05):** (Dosya satır numaraları bu turdaki değişikliklerle kaydı; bulgu fonksiyon adlarıyla izlenebilir.)
+  1. 7 fiş formunun `load_fis_data`/yardımcı okumaları (`SELECT * FROM fisler WHERE id=?` ve `kaynak_fis_id=?` sorguları) `AND firma_id=?` ile kapsamlendi; `kasa_view` kart-filtre sorgusu da kapsamlı.
+  2. `core/services.py` `fis_guncelle`: başlık UPDATE'inden sonra `rowcount==0` → `ValueError("Fiş bulunamadı (firma uyumsuzluğu) — güncelleme iptal edildi.")` — hiçbir satıra dokunmadan iptal (kısmi düzenleme kapısı kapandı). Satır DELETE'leri ve `kaynak_fis_id` SELECT/DELETE'leri `firma_id` kapsamlı.
+  3. `fatura_form` edit-yükleme kart JOIN'i → `LEFT JOIN {kart} s ON fs.hesap_id = s.id AND s.firma_id = ?`: id çakışması yanlış firmayı bağlamaz; silinmiş (durum=0) kartlı satırlar sessiz düşmez.
+  4. `cek_senet_form`: `UPDATE cekler_senetler ... WHERE id=? AND firma_id=?`; çek/senet durum yardımcılarındaki (services) firma'sız okumalar kapsamlı.
+- **Doğrulama:** servis smoke testi — yanlış firma id'siyle `fis_guncelle` → ValueError, fiş ve satırlar AYNEN duruyor (regresyon yok). Tüm formlar GUI smoke'unda açılıp kapandı.
 
-### C7. ⬜ Fiş no tekilliği DB'de garanti değil
+### C7. ✅ Fiş no tekilliği DB'de garanti (mevcut bozuk veriye çarpmayan güvenli kurulum)
 - `core/services.py:5-26` check-then-act; `db.py:136-153`'te `UNIQUE(fis_no, firma_id, yil)` yok. Bağlantı işlem-başına, lock yok → eşzamanlı iki kayıt aynı no'yu geçirebilir.
 - Benzer: `genel_tanimlar`'daki `INSERT OR IGNORE` (`db.py:235`) `Ana Firma (Varsayılan)` adında gerçek bir firma tanımlanırsa UNIQUE'e çarparak startup'ı bozar.
+- **Düzeltme (2026-09-05):** `core/db.py` — kısmi UNIQUE index: `uq_fisler_no_tarih ON fisler (fis_no, firma_id, yil, tarih) WHERE fis_no <> ''` (uygulama politikası `fis_no_kontrol` ile aynı granülerlik; boş fiş no'lu 3700+ fiş kapsamdışı). Kurulumdan önce mevcut veride ihlal taranır; ihlal varsa index **atlanır + konsol uyarısı** — startup asla kırılmaz. `INSERT OR IGNORE INTO firmalar` zaten sessiz-ignore ettiğinden startup riski yoktu; mevcut davranış korundu (NOT: `firmalar.firma_adi UNIQUE` olduğu için kullanıcı aynı adda ikinci firma açamaz — mevcut karta dokunulmadı).
+- **Doğrulama:** mevcut DB'de ihlal taraması 0 sonuç → index kuruldu; `tablolari_olustur()` iki kez çalıştırıldı (idempotent), compileall temiz.
 
 ### C8. ⬜ Kasa Virman aynı-kasa kontrolü yok
 - `modules/kasa/kasa_form.py:711-757` — `banka_form.py:632-634` bloke ediyor, kasa'da yok (kopyadan düşmüş). Kasa X→X virmanı kayıt olur, giriş/çıkış toplamlarını şişirir.
@@ -136,15 +144,20 @@ Uygulamanın **mimari omurgası sağlam**: tek merkezi fiş servisi, tutarlı fi
 ### C16. ⬜ Yıl kutusu firma-süzgücsüz
 - `__main__.py:79` — `SELECT DISTINCT yil FROM fisler` `firma_id` filtresiz → B firmasının yılları A'nın listesinde. `:92-93` `except Exception: pass` hata halinde listeyi sessizce eksik bırakıyor.
 
-### C17. ⬜ Açılış fişleri karşıt satırsız (tek taraflı)
+### C17. ✅ Karara bağlandı: Açılış fişleri tek taraflı kalacak — mizan modeli yok (tasarım gereği)
 - `modules/acilis/acilis_form.py:17-19` — "karşı satır oluşturulmaz". Küresel mizan bu yüzden hiç dengeleyemez.
-- *(2026-09-03) K2 bağlamında:* `_denge_kontrolu` yalnız **Cari satırlı** fişleri denetlediği için açılış fişleri (590/karşılıksız, Cari satırı yok) **otomatik kontrol dışı** → assert'i bloklamıyor. **Ancak C17'nin kendisi çözülmedi**: küresel mizan hâlâ açılış yüzünden dengeleyemez. Bu, ayrı bir muhasebe-modeli kararı olarak duruyor (590 karşıt satır modeli mi, yoksa açılışları Mizan'dan hariç mi).
+- *(2026-09-04 kullanıcı kararı — KAPADI):* Burası **ön muhasebe**; mizan diye bir rapor/kanıt yok, her modül kendi devrini gösterir (kasa açılışı borç 1.000 TL → kasa raporunda tek başına görünür, bu doğrudur). 590 karşıt satır **üretilmeyecek**; K2'nin `_denge_kontrolu` kapsamı (yalnız Cari satırlı fişler) bu kararla tutarlı — açılışlar kontrol dışı kalır.
+- **Sonraya not (yıl kapanışı olmadığından geçmiş yıl bakiyeleri devir alamıyor):** her modüle **Kapanış Fişi** yapılacak. Örnek Kasa: tüm kasa kartlarını ters hesap edip kapatır **ve** sonraki yılın açılış fişini otomatik üretir; maksat raporlarda (Kasa/Banka/Cari ekstre) kesintisiz bakiye görünmesi — muhasebe kaydı değil, rapor bütünlüğü. Detay: plan.md 🔵 "Kapanış Fişi".
 
-### C18. ⬜ `fis_sil` → `cek_senet_hareketleri` yetim kayıtları
+### C18. ✅ `fis_sil` → `cek_senet_hareketleri` yetim kayıtları temizleniyor
 - `core/services.py:154-180` hareket tablosunu temizlemiyor (FK/cascade yok); sadece `cek_senet_fis_sil` (`:588`) siliyor. Çek/senet fişi genel silme yolundan silinirse sarkan `fis_id` → `cek_senet_fis_son_hareket_mi:536` ve durum sorguları bozulur.
+- **Düzeltme (2026-09-05):** `fis_sil` artık ana fişin **ve** bağlı (kaynak_fis_id ile türetilmiş peşin/ödeme) fişinin `cek_senet_hareketleri` satırlarını siliyor; `fis_guncelle`'nin eski peşin fişi temizleme adımı da aynı şekilde hareket kayıtlarını siliyor. Çek/Senet modülü kendi yolunu (`cek_senet_fis_sil`) kullanmaya devam eder; bu, genel silme yolunun **güvence katmanı**.
+- **Doğrulama:** servis smoke testi — hareket satırı enjekte edilmiş fiş `fis_sil` ile silinince `cek_senet_hareketleri`'nde `fis_id` sarkan kayıt kalmıyor.
 
-### C19. ⬜ Şemada sıcak yollarda index yok
+### C19. ✅ Şemada sıcak yol index'leri eklendi
 - `db.py:136-173, 217-223` — `fis_satirlari(fis_id)` (her silme/güncelleme ve CASCADE bu FK'yı kullanıyor), `fisler(firma_id,yil)`, `fisler(fis_no)`, `fisler(kaynak_fis_id)` index'leri yok; `firma_id`'de FK/CHECK yok. Büyük veritabanında ilk yavaşlık burada çıkar.
+- **Düzeltme (2026-09-05):** `core/db.py` `tablolari_olustur()` içine 6 index (`CREATE INDEX IF NOT EXISTS` — mevcut DB'ye sorunsuz migrate olur): `idx_fis_satirlari_fis (fis_id)`, `idx_fisler_kaynak (kaynak_fis_id)`, `idx_csh_fis (fis_id)`, `idx_csh_cek_senet (cek_senet_id, islem_tarihi)`, `idx_genel_tanimlar_grup (grup, firma_id)` + C7'nin `uq_fisler_no_tarih`'i. (`idx_fisler_firma_tarih` zaten vardı, listelerin `(firma_id, yil, tarih)` süzgesi bu index'le destekli.)
+- **Doğrulama:** mevcut DB'de `tablolari_olustur()` iki kez çalıştırıldı (idempotent); index'ler `sqlite_master`'da görünüyor. (FK/CHECK ekleme işi bilinçli kapsam dışı — mevcut satırların doğrulanmasını gerektirir, veri migration'ı; şimdilik sadece index'ler.)
 
 ### C20. ⬜ `kaydet_kart` dinamik kolon SQL'i
 - `core/services.py:257-259, 268-271` — tablo adı whitelist'li ama `SET {columns}` parçaları dict **key**'lerinden f-string ile kuruluyor (değerler parametreli → metin-alan enjeksiyonu değil, ama kırılgan desen).
@@ -154,15 +167,31 @@ Uygulamanın **mimari omurgası sağlam**: tek merkezi fiş servisi, tutarlı fi
 
 ## 🟡 UX — Muhasebecinin her gün hissedeceği eksikler
 
-### U1. ⬜ "Kaydet ve Yeni Fiş" akışı yok
+### U1. ✅ "Kaydet ve Yeni Fiş" akışı var
 - Her kayıt formları kapatıp listeye döndürüyor (`kasa_form.py:813-815`; `fatura_form.py:827` `self.kapat()`). N fiş = N × (formu yeniden aç + kasa/hesap seç + tarih ayarla). **Günlük kullanımda en yüksek frekanslı sürtünme.**
+- **Düzeltme (2026-09-05):** 7 fiş formunun (kasa, banka, cari, açılış, çek/senet, fatura, fire) alt buton çubuğuna mavi **"Kaydet ve Yeni Fiş"** (`bg="#0d6efd"`) eklendi. Kayıt metodu `yeni_fis=False` parametresi aldı: başarıda modal göstermeden formu **yerinde** sıfırlayan `_yeni_fis_sifirla` — tarih ve ana hesap korunur, fiş no/açıklama/satırlar temizlenir, giriş satırı sıfırlanır (miktar 1,00 / KDV 20), `anlik_yenile` ile kirlilik anı sıfırlanır, durum çubuğunda kısa mesaj, liste arka planda yenilenir, odak fiş no'ya gider. Kasa/Banka/Cari/Açılış/Fatura/Fire ortak reset mantığı `ui/dirty_guard.py:yeni_fis_temel_sifirla` + formların kendi `temizle_giris_satiri`/`giris_satirini_temizle` helper'larıyla; Çek/Senet `temizle_giris_satiri()` + `_tahsil_onceki_durum` sıfırlamasıyla.
+- **Doğrulama:** 7 form GUI smoke'u — init temiz → fiş no yazınca kirli → `_yeni_fis_sifirla()` sonrası temiz + `fis_id is None`. Tree satır kirliliği + reset sonrası ağaç boşluğu doğrulandı.
 
-### U2. ⬜ Kaydedilmemiş değişiklik koruması yok
+### U2. ✅ Kaydedilmemiş değişiklik koruması var
 - `ui/main_window.py:319-336` (`_tab_kapat`), `:410-412` (`cikis_onayla` formdan habersiz), `:150-154` (firma/yıl değişimi tüm sekmeleri sessiz kapatır); formlarda `iptal()`/çarpı ile uyarısız diskart (`kasa_form.py:905-910`, 7 formda aynı).
 - `ui/widgets/editable_treeview.py:341-343` — geçersiz hücre mesaj vermmeden sessizce geri alınıyor.
+- **Düzeltme (2026-09-05) — `ui/dirty_guard.py` (yeni modül):** `form_anlik` = başlık widget'ları (tarih, fiş no, açıklama, ana hesap, fiş türüne özgü alanlar) + satır ağacının tuple anlık görüntüsü. `dirty_kur(form)` form kuruluşunda anı sabitler; `anlik_yenile(form)` her kayıttan/reset'ten sonra yeniden sabitler (kayıt sonrası kapanışta sorma); `kirli_mi(form)` anla karşılaştırır; `iptal_onayla(form, devam)` kirliyse `askyesno("Kaydedilmemiş Değişiklikler", ...)` ile onaylatır — **7 formun `iptal()`/`kapat()`'ı** buna bağlandı. Ana pencerede üç sessiz-diskart kapısı kapatıldı: `_tab_kapat`, `cikis_onayla` ve firma/yıl değişimi, `modul_formu_kirli_mi` + `_kirli_form_var_mi`/`_kirli_onay` ile açık ve kirli formları listeyip soruyor. `SayfaliListeMixin`/view tarafında `yenile()` delegasyonu korundu.
+- **EditableTreeview:** geçersiz hücre geri alımında 2 sn'lik sarı bilgi balonu (`_gecici_uyari`) — sessizlik bitti.
+- **Not:** `dirty_guard` ağaç adları `("tree_satirlar", "tree")` — kasa/banka/cari/çek/acilis `tree_satirlar`, fatura/fire `tree` kullanıyor; 5 formdaki `("tree_satirlari",)` yazım hatası bu yüzden satırları hiç izlemiyordu, düzeltildi.
+- **Doğrulama:** form smoke'ları (yukarı) + tree satır kirliliği testi + tüm modüller GUI'de açılıp kapatıldı.
 
-### U3. ⬜ Klavye akışı yok
+### U3. ✅ Klavye akışı geldi
 - `ui/dialogs.py`, `main_window.py`, `lookup_widget.py`'de `<Return>`=Kaydet / `<Escape>`=İptal binding'i yok; `LookupDialog` (`:61`) yalnız çift-tık/buton ile seçtirir; menülerde accelerator yok (F5 hariç). (Good: `EditableTreeview`'da Enter→sonraki hücre ve CurrencyFormatter zinciri var.)
+- **Düzeltme (2026-09-05):**
+  1. **`LookupDialog` klavyeyle tamamen kullanılabilir** (`ui/widgets/lookup_widget.py`): arama kutusunda `Return` → tek sonuçsa anında seçer, değilse ağaca geçer/ağaçta seçiliyse kaydeder; `Down` → ağaca geçer (ilk satıra odak); ağaçta `Return` → seç; pencerede `Escape` → kapat; `WM_DELETE_WINDOW` bağlandı.
+  2. **Menü kısayolları** (`ui/main_window.py`): `kisayollar` sözlüğü tek yerden — Alt+T Tanımlar, Alt+K Kasa, Alt+C Cari, Alt+F Fatura, Alt+B Banka, Alt+S Çek/Senet, Alt+R Raporlar, Alt+Y Ayarlar; menülerde `accelerator=` etiketi + `bind_all` ile gerçek binding; **Ctrl+Q → çıkış** (onay akışıyla). 
+  3. Form-LEVEL `Return`=Kaydet / `Escape`=İptal **bilinçli olarak bağlanmadı**: fiş formlarında çok alan + EditableTreeview hücre düzenleme akışı var; `bind_all("<Escape>")` LookupDialog'un Escape'i ile çakışırdı. İptal akışı zaten `iptal_onayla` ile korunuyor.
+- **Doğrulama:** binding'ler `py_compile` + GUI açılış testi; LookupDialog klavye davranışı kullanıcı testine bırakıldı (pencere görünürlüğüne bağlı `event_generate` tuzağı nedeniyle otomatik test edilmedi — bkz. plan.md notu).
+
+### U6. ✅ Rapor sekmeleri artık yenileniyor
+- `modules/raporlar/raporlar_view.py:93-94` — `RaporlarModulu.yenile()` gövdesi `pass`; `main_window.py:308-310` yalnız modül-genelini çağırıyor → her alt-görünümün `yenile()`'i (kategori listesi, KDV hesap id'leri, `stok_rapor_tabani.py:50,55`'te widget oluşturmada `aktif_yil`'e sabitlenen tarih varsayılanları) firma/yıl değişince yenilenmez. (Good: filtreler sekmeler arası korunuyor.)
+- **Düzeltme (2026-09-05):** `RaporlarModulu.yenile()` ve `StokRaporlariView.yenile()` **tembel-sekme-güvenli** yazıldı: seçili sekmenin başlığı `self._tabs`/`self._sekmeler` kaydıyla eşleştirilir (lazy sekmelerde `nametowidget` placeholder döndürdüğü için sözlükten bakılır), yalnız gerçekten oluşturulmuşsa `view.yenile()`'e delege edilir. Yeni `AltSekmeGrubu` (rapor gruplaması, bkz. aşağıdaki 🔧 günlüğü) aynı deseni taşır. Böylece firma/yıl değişiminde görünen raporun filtre/lookup/varsayılan-tarih verisi tazeleniyor.
+- **Doğrulama:** rapor grubu smoke'u — iç sekme tembel üretimi + `yenile()` çağrısı hatasız. (Görsel tazelik kullanıcı testi.)
 
 ### U4. ⬜ Büyük import/export'ta pencere donuyor, ilerleme göstergesi yok
 - Import baştan sona senkron ana thread'de (`kasa_view.py:308-375`); `ui/widgets/pagination.py:143-146` export için tüm sayfaları tek tek dolaşıyor. Kod tabanında `Progressbar` hiç yok (grep doğrulandı).
@@ -180,8 +209,13 @@ Uygulamanın **mimari omurgası sağlam**: tek merkezi fiş servisi, tutarlı fi
 - `modules/kasa/kasa_view.py:139` (arama her KeyRelease'te SQLite), `cek_senet_portfoy_raporu_view.py:37`, `cek_senet_cari_raporu_view.py:23` (tuş başına tam sorgu + treeview rebuild).
 - `modules/raporlar/satis_raporu_view.py:357-374, 404-423` — Yıllık görünüm 12 ardışık `_cogs_hesapla`, her biri o ay-sonuna kadar **tüm** stok hareketlerini baştan replay (~78× gereksiz iş; sekmeye her dönüşte önbelleksiz tekrar).
 
-### U9. ⬜ Çek/Senet edit'te konsola düşen sessiz hatalar
+### U9. ✅ Sessiz konsol hataları kullanıcıya gösteriliyor
 - `cek_senet_form.py:925, 962` — durum aramaları DB try-bloğu dışında; KeyError konsola basıyor, UI donmuş gibi görünüyor. `kasa_form.py:356-357` benzeri `print()`.
+- **Düzeltme (2026-09-05):**
+  1. `kasa_form.py`: `_on_hesap_select`'teki `print` → `messagebox.showerror("Hesap Seçim Hatası", ...)`; `satir_sil`'deki `print` → bilinçli `pass` (satır zaten listeden düşmüş — sessiz yoksay, yorumla belgeli).
+  2. `cek_senet_form.py`: `verileri_yukle` baştan sona `try/except` — hata `showerror("Veri Yükleme Hatası", ...)` olarak kullanıcıya çıkıyor, `finally` ile bağlantı kapatılıyor. `_durum_kontrol` ve `_tahsil_icin_durum_dogrula`: fiş satırında kart silinmişse (kayıp kart) KeyError yerine `showwarning("Kayıp Kart", ...)` + güvenli dönüş.
+  3. Fatura/fire formlarındaki kalan `print` hata yolları da `showerror`'a çevrildi.
+- **Doğrulama:** 7 fiş formunda `print(` kalmadı (grep temiz); kalanlar kapsam dışı debug log'ları (`kasa_view` import log'u, `dashboard_view` except, hizmet raporu traceback). compileall + GUI smoke.
 
 ### U10. ⬜ Küçük UX
 - Sütun genişlikleri hatırlanmıyor (her açılışta reset).
@@ -198,12 +232,12 @@ Uygulamanın **mimari omurgası sağlam**: tek merkezi fiş servisi, tutarlı fi
 
 | # | Durum | Bulgu | Konum |
 |---|-------|-------|-------|
-| Q1 | ⬜ | kasa_form ↔ banka_form ~653 birebir satır (similarity 0.72; cari↔acilis 0.50, kasa↔acilis 0.36, fatura↔fire 0.31). C8'deki eksik kontrol tam bu fork'un maliyeti. Ortak taban fiş-form sınıfı (Taslaktaki RefactoringBacklog ile örtüşüyor) bunu ve K3/C14'ün bir sınıfını kalıcı kılar. | `modules/kasa/kasa_form.py`, `modules/banka/banka_form.py` |
-| Q2 | ⬜ | 6 import dosyasında `_metin/_sayi/_tarih` helper'ları 6'şar kere kopya; 5 preview dialog `import_preview.py`'da yapısal aynı ~90 satır (K4-banka-NameError bunun semptomu). | `modules/*/*_import.py`, `ui/import_preview.py` |
+| Q1 | 🚫 Kararla kapandı | kasa_form ↔ banka_form ~653 birebir satır (similarity 0.72; cari↔acilis 0.50, kasa↔acilis 0.36, fatura↔fire 0.31). C8'deki eksik kontrol tam bu fork'un maliyeti. Ortak taban fiş-form sınıfı (Taslaktaki RefactoringBacklog ile örtüşüyor) bunu ve K3/C14'ün bir sınıfını kalıcı kılar. | `modules/kasa/kasa_form.py`, `modules/banka/banka_form.py` — **Kullanıcı kararı (04.09.2026): işlem formları BİLEREK ayrı tutuluyor, taban sınıf YAPILMAYACAK** (bkz. plan.md 🟠 Kararlar). K3/U1/U2 gibi düzeltmeler bu karara saygıyla form-form + paylaşılan küçük helper (`ui/dirty_guard.py`) ile yapıldı. |
+| Q2 | ✅ | 6 import dosyasında `_metin/_sayi/_tarih` helper'ları 6'şar kere kopya; 5 preview dialog `import_preview.py`'da yapısal aynı ~90 satır (K4-banka-NameError bunun semptomu). | `modules/*/*_import.py`, `ui/import_preview.py` — **Düzeltme (2026-09-05):** `utils/import_helpers.py` (yeni): `metin`/`sayi`/`tarih`/`durum_to_int` + `cari_id_bul`/`kasa_id_bul`/`banka_id_bul`/`banka_kurum_id_bul`/`stok_id_bul`/`hizmet_id_bul`. 6 import dosyasındaki kopya tanımlar silinip `as _metin` vb. takma adla içe aktarıldı (dosya içi çağrı noktaları değişmedi); davranış sözleşmesi birebir korundu (None / "ambiguous" / "wrong_type"). `sayi` Türkçe desenleri birleştirilmiş en iyi hâliyle aldı ("1.234,56"→1234.56, "1.000"→1000, "2.50"→2.5). Yerel kalanlar: map-tabanlı `_kasa_id_bul` (kasa_import), `_odeme_hesap_id_bul` (fatura). Doğrulama: bellek-içi sqlite sözleşme testleri + 6 modül import + compileall. (import_preview'daki 5 kopya diyalog bu turda birleştirilmedi — ayrı iş.) |
 | Q3 | ⬜ | `kaydet` ~470 satırlık state-machine (çek/senet); formlarda 150+ satırlık `kaydet`/`load_fis_data`. UI dosyalarından doğrudan SQL (lookup ve fiş yükleme `services`'ı baypas ediyor; yazma yolu `fis_kaydet/guncelle`'den geçiyor). | `cek_senet_form.py` vb. |
 | Q4 | ⬜ | Kırılgan widget deseni: `kasa_form.py:252-282` (+banka kopyası) `lookup.set` monkey-patch, StringVar trace + `after(50)/after(300)` polling, her `yeni_kart_ekle` çağrısında binding birikiyor. `cek_senet_form.py:785-795, 1104-1107` — hesap_id'yi yer-tutucu-0 hilesiyle, dict/list sırasının eşit varsayıldığı atama. | |
 | Q5 | ⬜ | `main_window._modul_aci` 10 dallı if/elif merdiveni (`:166-194`), F5 yolundaki `module_map`'ı (`:377-387`) tekrarlıyor → kayıt tablosuna dönüşmeli. | |
-| Q6 | ⬜ | Ölü kod: `modules/raporlar/stok_raporu_view.py` (hiçbir yerden referans yok — düzeltmelerin yanlış kopyaya düşmesini engellemek için sil); `services.py:1` kullanılmayan `import sqlite3`; `services.py:412,439` yanıltıcı/etkisiz parametreler; `fis_kaydet` id döner, `fis_guncelle` dönmez. | |
+| Q6 | 🔧 Kısmen | ~~Ölü kod: `modules/raporlar/stok_raporu_view.py`~~ **SİLİNDİ (2026-09-05, kullanıcı onaylı backlog maddesi).** Kalan: `services.py:1` kullanılmayan `import sqlite3`; `services.py:412,439` yanıltıcı/etkisiz parametreler; `fis_kaydet` id döner, `fis_guncelle` dönmez. | |
 | Q7 | ⬜ | `ui/widgets/editable_treeview.py:274-276, 285-287` — `_on_escape` iki kez tanımlı (ikinci gölgeleme). `lookup_widget.py:113` — iid olarak ham id (yer yer `str(i_id)` ile tutarsız). | |
 | Q8 | ⬜ | Bağlantı deseni: `sqlite3.connect(DB_YOLU)` işlem-başına (`core/db.py:11`), WAL/`timeout` yok — tek-thread GUI'de sorun değil ama arka plan işi + eşzamanlı yazıcı eklenirse "created in another thread" / "database is locked" ile ilk çarpan yer olur. | |
 | Q9 | ⬜ | `yenile()` sözleşmesi formlar arası farklı (kasa/banka sözlükleri yeniden yükler; cari `:766-769`, çek/senet `:1335-1337`, acilis `:494-496` `view_container.listele()` çağırır) → yeni kart bir forma giriyor, diğerine girmiyor. | |
@@ -230,17 +264,18 @@ Uygulamanın **mimari omurgası sağlam**: tek merkezi fiş servisi, tutarlı fi
 | Önce | Madde | Neden bu sırada |
 |-------|-------|-----------------|
 | 1 | ✅ **K1** — fatura edit-load'u `ara_toplam`'a (`fatura_form.py:884`) | Tek satırlık düzeltme; aktif veri yozlaşmasını durdurdu. Geçmiş tarama: yalnız id=7525 bozuk (test fişi). |
-| 2 | ✅ **K2** — `fis_kaydet/fis_guncelle`'e borç=alacak assert'i (`services.py:29`) | Veri-katmanı güvencesi eklendi; kapsam="yalnız Cari satırlı fiş" → C17'yi beklemeye gerek kalmadı. Canlı DB'de 346/347 geçti (0 regresyon). **C17 (açılış 590 modeli) ayrı karar olarak duruyor.** |
-| 2b | ⬜ **K3** — assert aktifleşti, artık 191/391 kartı eksikse net "KDV kartı tanımlı değil" hatası şart | K2'nin doğal devamı (aşağıda kenetli). |
+| 2 | ✅ **K2** — `fis_kaydet/fis_guncelle`'e borç=alacak assert'i (`services.py:29`) | Veri-katmanı güvencesi eklendi; kapsam="yalnız Cari satırlı fiş" → C17'yi beklemeye gerek kalmadı. Canlı DB'de 346/347 geçti (0 regresyon). **C17 karara bağlandı (04.09): açılışlar tek taraflı kalır, mizan mantığı yok.** |
+| 2b | ✅ **K3** — assert aktifleşti, artık 191/391 kartı eksikse net "KDV kartı tanımlı değil" hatası şart | 03.09'da tamamlandı (banka kardeşiyle birlikte). |
 | 3 | ✅ **K4** — `export.py` `_parse_numeric_value` (tarih/sayı) + PDF landscape + pandas guard | 18/18 davranış testi; `py_compile` temiz. |
 | 4 | ❓ **K5 + C8 fire + C4** — stok bakiye kontrolü / FIFO eksik katman / iade maliyeti | **KARAR GEREKİYOR** (K5 bloğundaki A/B/C seçenekleri) — bu turda uygulanmadı. |
 | 5 | ✅ **K6** — çek/senet durumu `MAX(id)` → `(islem_tarihi, id)` | 6 yer düzeltildi, SQL canlı DB'de hatasız; tabloda hareket yok, veri testi kullanıcıda. |
-| 6 | **U1 + U2 + U3** — Kaydet-ve-Yeni + Enter/Esc + dirty-guard | Günlük UX'te en büyük kazanç |
-| 7 | **C6 + C7 + C19** — edit yüklemelerine `AND firma_id=?` / `AND yil=?`, UNIQUE constraint, index'ler | Sağlamlık (ulaşılamaz kapıları kapatır) |
-| 8 | **Q1 + Q2** — form taban sınıfı + import dedup refactor | Sonraki bug'ların üretim hattını kapatır (Taslak backlog ile örtüşüyor) |
-| 9 | Kalan C'ler (C1-C20, ❓'lileri karara bağlayarak) ve U'lar | Tek tek |
+| 6 | ✅ **U1 + U2 + U3** — Kaydet-ve-Yeni + Enter/Esc + dirty-guard | 05.09 tamamlandı (aşağıda 🔧 günlüğü). Form-level Return/Esc bilinçli kapsam dışı (U3 notu). |
+| 7 | ✅ **C6 + C7 + C19** (+ C18) — edit yüklemelerine `AND firma_id=?`, UNIQUE constraint, index'ler, yetim hareket temizliği | 05.09 tamamlandı. |
+| 8 | ✅ **Q2** — import helper'ları `utils/import_helpers.py`'da toplandı · Q1 → **KARAR: formlar ayrı kalacak** (taban sınıf yapılmayacak) | 05.09; import_preview kopya diyalogları ayrı iş olarak kaldı. |
+| 8b | ✅ **Rapor gruplaması** — Ekstre ve Hizmet raporları tek ana sekme altında (`AltSekmeGrubu`) | Stok/Çek-Senet deseni genelleştirildi; "Sonraki adım" (plan.md) uygulandı. |
+| 9 | Kalan C'ler (C2-C5, C8-C16, C20 — ❓'lileri karara bağlayarak) ve U'lar (U4, U5, U7, U8, U10) | Tek tek |
 
-**Not:** C1 (nakit satışın caride görünmemesi) ve C17 (açılış karşıt satırı) mimari tasarım kararlarıdır — "bug mı, tercih mi" önce karar verilmeli; K2'nin assert'i bu kararlara bağlanır.
+**Not:** C1 (04.09) ve C17 (04.09) karara bağlandı — peşin satış cariye gitmez; açılışlar tek taraflı kalır (mizan mantığı yok). Mimari ❓ kalmadı.
 
 ---
 
@@ -315,6 +350,14 @@ Uygulamanın **mimari omurgası sağlam**: tek merkezi fiş servisi, tutarlı fi
 - **Çek/Senet eksi kontrolüne DAHİL EDİLDİ:** `modules/cek_senet/cek_senet_form.py` fiş kaydına `eksi_kontrol_ve_onayla` eklendi (kasa/banka tahsilat/ödeme satırları).
 - **"Bir kere uyar" oturum bazlı KALDI** (değişiklik yok).
 - **Doğrulama:** `core.services`, `eksi_calisma_view`, `cek_senet_form` `py_compile` + import temiz; sabitler gerçekten kaldırıldı; politika dağıtımı + `eksi_duzeltilecekler` tekrar test edildi (izin_verme→engelle; stok S1 −5 yakalandı).
+
+### 05.09 turu — Sağlamlık + UX + Kalite (C6, C7, C18, C19 · U1, U2, U3, U6, U9 · Q2 · rapor gruplaması · ölü dosya) ✅
+- **Kapsam:** bu turda raporun ⬜ maddelerinden 10'u kapandı; hiçbir commit yapılmadı, hepsi çalışma ağacında.
+- **Sağlamlık:** C6 edit-yükleme firma kapsamları + `fis_guncelle` rowcount muhafızı + fatura LEFT JOIN firma süzgesi (`services.py`, 7 form, `kasa_view.py`); C7 kısmi UNIQUE index `uq_fisler_no_tarih` (ihlal taramalı, startup-güvenli); C18 `fis_sil`/`fis_guncelle` → `cek_senet_hareketleri` yetim temizliği; C19 5 yeni index (`db.py`).
+- **UX:** `ui/dirty_guard.py` (yeni) + 7 forma `dirty_kur`/`anlik_yenile`/`iptal_onayla` entegrasyonu (U2); "Kaydet ve Yeni Fiş" butonu + `yeni_fis` akışı 7 formda (U1); `LookupDialog` tam klavye + Alt+harf/Ctrl+Q menü kısayolları (U3); `RaporlarModulu`/`StokRaporlariView`/`AltSekmeGrubu` tembel-sekme-güvenli `yenile()` (U6); sessiz `print` hataları → `showerror`/`showwarning` (U9).
+- **Kalite:** Q2 → `utils/import_helpers.py` (yeni) + 6 import dosyasından kopya helper'ların silinmesi; ölü `stok_raporu_view.py` silindi; rapor gruplaması `modules/raporlar/alt_sekme_grubu.py` (yeni) — Ekstre (Cari/Kasa/Banka) ve Hizmet (Kartlar+Detay) tek ana sekme altında.
+- **Doğrulama (tur sonu):** `compileall` temiz; servis smoke'ları (rowcount muhafızı, yetim temizliği, import helper sözleşmeleri); GUI smoke'ları — 8 modül açılışı, 7 form kirlilik/reset/tree döngüsü, rapor grupları tembel üretim + `yenile()`.
+- **Bu turda BİLEREK yapılmayanlar:** form-level Return/Esc (LookupDialog çakışması — U3 notu); `import_preview.py` 5 kopya diyalog birleştirmesi; `FisListeMixin` (plan.md backlog'da duruyor); `firmalar`/schema FK-CHECK dönüşümü (veri migration'ı gerektirir).
 
 ### Hâlâ açık (kullanıcıya kalmış)
 - id=7525 bozuk test fişi DB'de dokunulmadan duruyor (sil/düzelt kararı bekliyor).

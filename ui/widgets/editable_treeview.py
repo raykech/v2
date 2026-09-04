@@ -340,8 +340,29 @@ class EditableTreeview(ttk.Treeview):
 
         if not accepted and self.exists(iid):
             # Geçersiz değer: hücreyi eski metnine geri al
+            # U2: sessiz geri alım kullanıcıyı şaşırtıyordu — kısa bir bilgi balonu göster
             self.set(iid, col, prev if prev is not None else "")
+            if raw:
+                self._gecici_uyari("Geçersiz değer — hücre eski haline getirildi.")
         return accepted
+
+    def _gecici_uyari(self, metin):
+        """Widget'ın yanında 2 sn görünüp kaybolan küçük bilgi balonu (U2)."""
+        try:
+            if getattr(self, "_uyari_win", None) and self._uyari_win.winfo_exists():
+                self._uyari_win.destroy()
+            x = self.winfo_rootx() + self.winfo_width() // 2
+            y = self.winfo_rooty() + self.winfo_height() // 2
+            win = tk.Toplevel(self)
+            win.overrideredirect(True)
+            win.geometry(f"+{x}+{y}")
+            tk.Label(win, text=metin, bg="#fff3cd", fg="#7a5b00",
+                     relief="solid", bd=1, padx=8, pady=4, font=("Arial", 9)).pack()
+            win.lift()
+            self._uyari_win = win
+            win.after(2200, win.destroy)
+        except Exception:
+            pass
 
     def cancel_active_edit(self):
         """Formdan çağrılabilir: açık editörü kaydetmeden kapatır."""

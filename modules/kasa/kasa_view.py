@@ -450,7 +450,8 @@ class KasaModulu(SayfaliListeMixin, tk.Frame):
         # Arayüzdeki metne güvenmek yerine, DB'den kesin bilgiyi al
         conn = veritabani_baglan()
         cursor = conn.cursor()
-        cursor.execute("SELECT kaynak_modul, kaynak_fis_id FROM fisler WHERE id=?", (fis_id,))
+        cursor.execute("SELECT kaynak_modul, kaynak_fis_id FROM fisler WHERE id=? AND firma_id=?",
+                       (fis_id, self.main_app.aktif_firma_id))
         result = cursor.fetchone()
         conn.close()
         

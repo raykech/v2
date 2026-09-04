@@ -221,6 +221,42 @@ def tablolari_olustur():
     cursor.execute("""
         CREATE INDEX IF NOT EXISTS idx_fisler_firma_tarih ON fisler (firma_id, tarih);
     """)
+    # C19: sıcak yollar — fiş→satır silme/güncelleme/cascade, kaynak fiş araması,
+    # çek/senet hareket sorguları, genel tanımlar lookup'ları
+    cursor.execute("""
+        CREATE INDEX IF NOT EXISTS idx_fis_satirlari_fis ON fis_satirlari (fis_id);
+    """)
+    cursor.execute("""
+        CREATE INDEX IF NOT EXISTS idx_fisler_kaynak ON fisler (kaynak_fis_id);
+    """)
+    cursor.execute("""
+        CREATE INDEX IF NOT EXISTS idx_csh_fis ON cek_senet_hareketleri (fis_id);
+    """)
+    cursor.execute("""
+        CREATE INDEX IF NOT EXISTS idx_csh_cek_senet ON cek_senet_hareketleri (cek_senet_id, islem_tarihi);
+    """)
+    cursor.execute("""
+        CREATE INDEX IF NOT EXISTS idx_genel_tanimlar_grup ON genel_tanimlar (grup, firma_id);
+    """)
+
+    # --- C7: Fiş no tekilliği DB düzeyinde (uygulama politikasıyla aynı granülerlik:
+    # aynı no, aynı firma+yıl+tarih içinde tekrar edemez; farklı tarih serbest).
+    # Boş fis_no kapsamdışı (3700+ fişte no yok). Mevcut veride ihlal yoksa oluşturulur;
+    # varsa (ör. aynı no aynı gün çift kaydedilmişse) uyarı verilir ve atlanır —
+    # startup'ı kırmamak için.
+    ihlal = cursor.execute(
+        """
+        SELECT fis_no, firma_id, yil, tarih, COUNT(*) FROM fisler
+        WHERE fis_no <> '' GROUP BY fis_no, firma_id, yil, tarih HAVING COUNT(*) > 1 LIMIT 1
+        """
+    ).fetchone()
+    if ihlal:
+        print(f"[UYARI] fiş no tekrarı nedeniyle DB UNIQUE atlandı: {ihlal}")
+    else:
+        cursor.execute("""
+            CREATE UNIQUE INDEX IF NOT EXISTS uq_fisler_no_tarih
+            ON fisler (fis_no, firma_id, yil, tarih) WHERE fis_no <> '';
+        """)
 
     # --- FİRMALAR TABLOSU ---
     cursor.execute(

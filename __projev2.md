@@ -67,6 +67,7 @@ modules/
     raporlar_view.py        Raporlar ana görünümü (Notebook sekmeleri)
     hesap_ekstresi_view.py  Hesap ekstresi (Stok/Cari/Kasa/Banka/Hizmet — FIFO destekli)
     stok_raporlari_view.py  Stok Raporları ana sekmesi (iç Notebook, tembel sekmeler)
+    alt_sekme_grubu.py      Genel iç-sekme taşıyıcısı — Ekstre ve Hizmet rapor grupları (05.09.2026)
     stok_rapor_tabani.py    Stok raporları ortak taban sınıfı (tarih/kategori/durum/arama/limit)
     stok_durum_raporu_view.py  Stok Durum Raporu
     stok_satis_raporu_view.py  En Çok Satan / Az Satan + Hiç Satış Yapmayan ürünler
@@ -76,6 +77,7 @@ modules/
     kdv_raporu_view.py      KDV Raporu (191 İndirilecek / 391 Hesaplanan)
     cari_bakiye_raporu_view.py  Cari Bakiyeleri raporu
     satis_raporu_view.py    Aylık Satış Raporu (kâr/zarar, FIFO maliyet)
+    duzeltilecekler_view.py Eksi Çalışma kontrol panosu (Özet/Kasa/Banka/Stok sekmeleri)
     cek_senet_raporlari_view.py  Çek/Senet raporları ana sekmesi (iç Notebook)
     cek_senet_portfoy_raporu_view.py   Portföy (güncel durum)
     cek_senet_vade_raporu_view.py      Vade Takvimi (vade dilimleri)
@@ -85,12 +87,14 @@ modules/
     ayarlar_view.py         Ayarlar ana görünümü (Notebook sekmeleri)
     firma_tanimlari_view.py Firma tanımları (ekle/düzenle/listele)
     yil_tanimlari_view.py   Yıl tanımları (genel_tanimlar 'Yillar' grubu)
+    eksi_calisma_view.py    Eksi Çalışma politikası ayarları (Kasa/Banka/Stok)
 ui/
-  main_window.py            Ana pencere, sekmeler, F5 ile yeniden yükleme
+  main_window.py            Ana pencere, sekmeler, klavye kısayolları, F5 ile yeniden yükleme
+  dirty_guard.py            U1/U2 — form anlık görüntüsü, kirli-onay, yeni-fiş temel reset
   dialogs.py                Yeni kart ekleme/düzenleme diyalogları + FirmaYilDialog
   import_preview.py         Import önizleme dialog sınıfları (Kasa, Fatura, Banka, Cari, Çek/Senet, Tanım)
   widgets/
-    lookup_widget.py        Arama ve seçim bileşeni
+    lookup_widget.py        Arama ve seçim bileşeni (tam klavye: Return/Down/Esc)
     advanced_treeview.py    Gelişmiş filtreli/sıralamalı Treeview bileşeni
     editable_treeview.py    Excel tarzı satır içi düzenleme bileşeni
     pagination.py           Aşağı kaydıkça yükleyen (infinite scroll) liste mixin'i
@@ -98,13 +102,15 @@ ui/
 utils/
   formatters.py             Para/tarih formatlama, KDV hesabı (Decimal + ROUND_HALF_UP)
   export.py                 Excel / PDF dışa aktarma
+  import_helpers.py         Ortak Excel/CSV import yardımcıları — dönüştürücüler + kart-id bulucular (Q2)
+  eksi_uyari.py             Eksiye düşme politikası uygulayıcısı (messagebox + oturum hafızası)
 docs/laravel/               Gelecekteki Laravel + Vue + Inertia web geçiş planı (bağımsız dokümanlar)
 __importlar/                Excel import deneme/örnek dosyaları (çalışma zamanı dışı)
 ```
 
-> Not: `modules/raporlar/stok_raporu_view.py` eski bir dosyadır ve raporlar
-> notebook'una bağlı değildir; yeni rapor yapısı `raporlar_view.py` üzerinden kurulmuştur.
-> Silinmesi `plan.md` 🔵 refaktoring backlog'da bekliyor.
+> Not: Eski ölü dosya `modules/raporlar/stok_raporu_view.py` **silindi (05.09.2026)**;
+> canlı rapor yapısı `raporlar_view.py` + `stok_raporlari_view.py`/`alt_sekme_grubu.py`
+> üzerindedir.
 
 ---
 
@@ -183,10 +189,11 @@ __importlar/                Excel import deneme/örnek dosyaları (çalışma za
 ## 4. Ortak İş Mantığı (`core/services.py`)
 
 - `fis_no_kontrol(...)` – Fiş numarasının aynı firma + yıl içinde benzersizliğini kontrol eder
-  (tarih verilirse aynı tarih içinde tekrar da engellenir; boş numaraya izin verilir).
-- `fis_kaydet(...)` – Yeni fiş + satırlar + opsiyonel peşin ödeme fişi kaydeder. Kayıttan önce `fis_no_kontrol` yapılır.
-- `fis_guncelle(...)` – Fişi ve satırlarını günceller, eski peşin ödeme fişini siler. (`yil` UPDATE'te de set edilir)
-- `fis_sil(...)` – Fişi ve bağlı satırları siler.
+  (tarih verilirse aynı tarih içinde tekrar da engellenir; boş numaraya izin verilir). DB
+  düzeyinde ayrıca `uq_fisler_no_tarih` kısmi UNIQUE index var (C7).
+- `fis_kaydet(...)` – Yeni fiş + satırlar + opsiyonel peşin ödeme fişi kaydeder. Kayıttan önce `fis_no_kontrol` ve `_denge_kontrolu` (K2: yalnız Cari satırlı fişlerde |borç−alacak| ≤ 0,01) yapılır.
+- `fis_guncelle(...)` – Fişi ve satırlarını günceller, eski peşin ödeme fişini (satır + hareket kayıtlarıyla) siler. (`yil` UPDATE'te de set edilir.) **C6 muhafızı:** başlık UPDATE `rowcount==0` ise `ValueError` — hiçbir satıra dokunmadan iptal; satır DELETE'leri firma kapsamlı.
+- `fis_sil(...)` – Fişi, bağlı (kaynak_fis_id) fişini ve **hepsinin `cek_senet_hareketleri` kayıtlarını** siler (C18 — yetim hareket bırakmaz).
 - `kaydet_kart(...)` / `kart_sil(...)` – Tanım kartlarını ekler/günceller/siler.
 - `is_kart_kullanilmis_mi(...)` – Kartın fişlerde kullanılıp kullanılmadığını kontrol eder.
 - **Güvenlik (SQL enjeksiyon whitelist):** `GECERLI_KART_TABLOLARI` sözlüğü; `kart_sil`,
@@ -195,14 +202,19 @@ __importlar/                Excel import deneme/örnek dosyaları (çalışma za
 - **KDV yardımcıları:**
   - `kdv_hesap_idleri(cursor, firma_id)` – Firmanın 191/391 KDV hesap ID'lerini döndürür `(indirilecek, hesaplanan)`.
   - `kdv_satiri_olustur(kdv_hesap_id, kdv_tutar, yon, aciklama)` – KDV için ayrı fiş satırı üretir (`yon`: `'borc'` → 191, `'alacak'` → 391).
-- **Stok yardımcısı:**
+- **Stok yardımcıları:**
   - `stok_bakiye_ve_maliyet(cursor, firma_id)` – Stok bakiyesi (miktar) + FIFO kalan maliyeti
     `{stok_id: değer}` sözlükleri olarak `(bakiyeler, maliyetler)` döndürür. Tek kaynak;
     Stok Durum Raporu ve Giriş dashboard'u kullanır. `fis_satirlari` üzerinde tam tarama
     gerektirdiğinden **tanım listelerinde çalıştırılmaz** (Tanımlar → Stok artık saf kart listesidir).
+  - `stok_donem_ozeti(cursor, firma_id, bas, bit)` / `stok_donem_cogs(...)` – Stok raporlarının
+    ortak veri servisleri (fiş türü bazında dönem özeti; kart bazında FIFO maliyet).
 - **Dönem kontrolü:**
   - `aktif_yil_kontrolu(tarih_nesnesi, aktif_yil)` – Fiş tarihi seçili çalışma yılı dışındaysa açıklayıcı hata mesajı döndürür, uygunsa `None`. Tüm fiş formları kaydetmeden önce bu kontrolü yapar (yanlış yıla fiş taşınmasını engeller).
-- Çek/Senet yardımcıları:
+- **Eksi Çalışma servisleri:** `ayar_oku`/`ayar_yaz` (firma bazlı `genel_tanimlar` üzerinde politika
+  anahtarları), `eksi_dusme_kontrol` (fiş yazılmadan önce kartın fiş-sonrası bakiye/miktarını
+  hesaplar), `eksi_duzeltilecekler` (Düzeltilecekler raporu — kronolojik replay; `_para_sorunlari`/`_stok_sorunlari`).
+- Çek/Senet yardımcıları (durum seçimleri tarih+id ile — K6):
   - `cek_senet_guncel_durum`
   - `cek_senet_son_banka_takas`
   - `cek_senet_fis_son_hareket_mi`
@@ -472,15 +484,17 @@ Raporlar notebook'undaki sekmeler:
 | Sekme | Dosya | İçerik |
 |---|---|---|
 | **Stok Raporları** | `stok_raporlari_view.py` | İç notebook (bkz. aşağıdaki alt sekme tablosu) — tüm stok raporları tek yerde |
-| Cari Ekstre | `hesap_ekstresi_view.py` (Cari) | Cari hareketleri + bakiye |
-| Kasa Ekstre | `hesap_ekstresi_view.py` (Kasa) | Kasa hareketleri + bakiye |
-| Banka Ekstre | `hesap_ekstresi_view.py` (Banka) | Banka hareketleri + bakiye |
-| Hizmet Kartları Raporu | `hizmet_kartlari_raporu_view.py` | Mizan: GELİRLER üstte, GİDERLER altta, gruplar altında kartlar; **tarih aralığına uyar** ve tutarlar **miktar × birim fiyat**tan hesaplanır |
-| Hizmet Kartları Detay | `hesap_ekstresi_view.py` (Hizmet) | Hizmet kartı hareket detayı; satır tutarları **miktar × birim fiyat**tan hesaplanır |
+| **Ekstre Raporları** | `alt_sekme_grubu.py` (Cari/Kasa/Banka `hesap_ekstresi_view.py`) | İç notebook: **Cari Ekstre**, **Kasa Ekstresi**, **Banka Ekstresi** — hareketler + bakiye (05.09.2026 gruplaması) |
+| **Hizmet Raporları** | `alt_sekme_grubu.py` | İç notebook: **Hizmet Kartları Raporu** (`hizmet_kartlari_raporu_view.py` — mizan: GELİRLER üstte, GİDERLER altta, tutarlar **miktar × birim fiyat**) + **Hizmet Kartları Detay** (`hesap_ekstresi_view.py` Hizmet) |
 | Çek/Senet Raporları | `cek_senet_raporlari_view.py` | İç notebook: **Portföy** (güncel durum), **Vade Takvimi** (vade dilimleri), **Serüven** (seçili çek/senedin hareketleri), **Cari Bazlı Özet** |
 | KDV Raporu | `kdv_raporu_view.py` | 191 İndirilecek / 391 Hesaplanan hareketleri; tarih aralığı, aylık alt toplamlar, genel toplamlar ve **"Ödenecek/Devreden KDV (391 − 191)"** farkı |
 | Cari Bakiyeleri | `cari_bakiye_raporu_view.py` | Tüm carilerin güncel borç/alacak bakiyeleri + **Cari Türü (Müşteri/Tedarikçi/Diğer) filtresi** + toplamlar |
 | Kar/Zarar Raporu | `satis_raporu_view.py` | **Aylık** sekme (ay seçimiyle detaylar) + **Yıllık** sekme (12 ay 6+6 grid, her ayın tüm kalemleri, altta tüm yıl toplamları) |
+| Düzeltilecekler | `duzeltilecekler_view.py` | **Eksi çalışma kontrol panosu**: dönem filtresi + iç içe Özet/Kasa/Banka/Stok sekmeleri; hesap/kart başına tek özet satırı (dönem sonu eksi veya maliyetsiz satış), çift tık → sorunun başladığı fişe gider (`go_to_module_and_select_fis`) |
+
+Not: Ekstre/Hizmet grupları `alt_sekme_grubu.AltSekmeGrubu` taşıyıcısını kullanır —
+`(başlık, factory)` listesi verilir, iç sekmeler tembel oluşturulur; StokRaporlariView
+deseninin genelleştirilmiş hâlidir (05.09.2026).
 
 #### Stok Raporları (alt sekmeler)
 
@@ -505,16 +519,22 @@ Veri kaynağı `core/services.py` → `stok_donem_ozeti()` (fiş türü bazında
 
 Tüm raporlar **Excel (.xlsx)** ve **PDF** olarak dışa aktarılabilir (`utils/export.py` → `export_treeview_data`).
 
-**Rapor yükleme davranışı:** Raporlar sekmesine girildiğinde **rapor sekmeleri tembel (lazy) oluşturulur** — yalnızca ilk açılan sekme (Stok Raporları → Stok Durum) başta kurulur; diğer rapor sekmeleri ilk tıklandığında oluşturulur. İç içe notebook'larda (Stok Raporları, Çek/Senet Raporları) alt sekmeler de temeldir; `<<NotebookTabChanged>>` olayında `event.widget` kontrolüyle yalnızca kendi notebook'unun sekme değişimi işlenir. Hiçbir rapor otomatik veri yüklemez (kasıntı engeli); her rapor yalnızca kullanıcı **"Listele" / "Raporu Getir"** butonuna bastığında doldurulur. Ekstre sekmelerinde hesap seçimi **aramalı LookupWidget** ile yapılır (Cari/Stok/Kasa/Banka/Hizmet — listeden yeni kart da eklenebilir).
+**Rapor yükleme davranışı:** Raporlar sekmesine girildiğinde **rapor sekmeleri tembel (lazy) oluşturulur** — yalnızca ilk açılan sekme (Stok Raporları → Stok Durum) başta kurulur; diğer rapor sekmeleri ilk tıklandığında oluşturulur. İç içe notebook'larda (Stok Raporları, Çek/Senet Raporları, Ekstre/Hizmet grupları → `AltSekmeGrubu`) alt sekmeler de temeldir; `<<NotebookTabChanged>>` olayında `event.widget` kontrolüyle yalnızca kendi notebook'unun sekme değişimi işlenir. Tembel sekmelerde `nametowidget` placeholder döndürdüğü için `yenile()` delegasyonu **sekmeler sözlüğünden** bakılarak yapılır (U6). Hiçbir rapor otomatik veri yüklemez (kasıntı engeli); her rapor yalnızca kullanıcı **"Listele" / "Raporu Getir"** butonuna bastığında doldurulur. Ekstre sekmelerinde hesap seçimi **aramalı LookupWidget** ile yapılır (Cari/Stok/Kasa/Banka/Hizmet — listeden yeni kart da eklenebilir).
 
 **Ekstrelerde Fiş ID ve sağ tık → Kaynağa Git:** Tüm ekstre tablolarında (Stok/Cari/Kasa/Banka/Hizmet Detay) her hareket satırının başında **Fiş ID** kolonu bulunur. Gösterilen ID, hareketin geldiği fişin **kaynak fiş** ID'sidir (eğer varsa — örn. peşin ödeme fişi yerine asıl fatura ID'si görünür); kaynak yoksa fişin kendi ID'si yazılır. Bir satıra **sağ tıklanınca → "Kaynağa Git"** menüsü açılır; tıklanırsa ilgili fişin modülüne gidilir ve fiş listede seçilip vurgulanır. Hedef fiş **aktif yıldan farklı bir yıldaysa uyarı verilir** ve gidilmez (önce durum çubuğundan yıl değiştirilmeli).
 
 
 ### 5.8. Ayarlar
 
-Ayarlar notebook'u iki sekmeden oluşur:
+Ayarlar notebook'u üç sekmeden oluşur:
 - **Firma Tanımları** (`firma_tanimlari_view.py`): Firma ekleme/düzenleme, durum (Aktif/Pasif), arama filtresi.
 - **Yıl Tanımları** (`yil_tanimlari_view.py`): `genel_tanimlar` tablosunun **"Yillar"** grubuna yıl ekleme/kaldırma; eklenen yıllar firma/yıl seçim ekranının yıl listesinde görünür.
+- **Eksi Çalışma** (`eksi_calisma_view.py`): Kasa/Banka/Stok için "eksiye düşme" politikası —
+  **İzin verme / Her seferinde uyar / Bir kere uyar / Hiçbir şey yapma** (varsayılan: Bir kere uyar;
+  "bir kere" oturum bazlı). Ayarlar firma bazlı `genel_tanimlar` üzerinde `ayar_oku`/`ayar_yaz`
+  (core/services) ile saklanır. Fiş kaydında `eksi_dusme_kontrol` + `utils/eksi_uyari.py`
+  `eksi_kontrol_ve_onayla` uygulanır (kasa/banka/cari/fatura/fire/çek-senet formları);
+  ekstrelerde eksi satırlar kırmızı; raporlarda **Düzeltilecekler** sekmesi (bkz. §5.7).
 
 Ayrıca ana pencerenin durum çubuğuna tıklanınca açılan **FirmaYilDialog** (`ui/dialogs.py`) ile
 çalışma sırasında firma ve yıl değiştirilebilir; değişiklikte açık sekmeler kapatılıp modüller
@@ -529,6 +549,8 @@ yeni firma/yıl ile tazelenir.
 - Firma ve yıl seçimi ile giriş yapılır; ardından **Giriş (Genel Durum)** sekmesi açılır.
 - Modüller sekmeler hâlinde açılır; sekmeler **sürüklenerek yeniden sıralanabilir** (Giriş sekmesi sabittir, en başta kalır), `x` ile kapatılabilir.
 - Sekmeler arası geçişte aktif modül otomatik yenilenir.
+- **Klavye kısayolları (U3):** Modül menülerinde `Alt+T` Tanımlar, `Alt+K` Kasa, `Alt+C` Cari, `Alt+F` Fatura, `Alt+B` Banka, `Alt+S` Çek/Senet, `Alt+R` Raporlar, `Alt+Y` Ayarlar (`kisayollar` sözlüğü tek kaynak — hem `accelerator` etiketi hem `bind_all` binding'i oradan üretilir); **Ctrl+Q** çıkış.
+- **Kirli form onayı (U2):** sekme kapatma, çıkış ve firma/yıl değişimi öncesi açık fiş formunda kaydedilmemiş değişiklik varsa `ui/dirty_guard.py:modul_formu_kirli_mi` üzerinden "Kaydedilmemiş Değişiklikler" onayı sorulur.
 - Durum çubuğu firma/yıl bilgisini gösterir; tıklanınca firma/yıl değiştirme diyaloğu açılır.
 - Geliştirme sırasında **F5** ile aktif modül ve bağımlılıkları yeniden yüklenir.
 - Modüller üst menüden ("Modüller") ve üst buton panelinden açılır.
@@ -538,6 +560,7 @@ yeni firma/yıl ile tazelenir.
 - `...` butonu ile arama diyaloğu açılır.
 - Yeni kart ekleme, düzenleme ve silme işlemleri diyalog içinden yapılabilir.
 - Seçim sonrası otomatik KDV dolumu ve odaklanma davranışları tetiklenebilir.
+- **Klavye akışı (U3):** aramada `Return` → tek sonuçsa anında seçer, değilse ağaca geçer (ağaçta seçiliyse kaydeder); `Down` → ağaca geçer; ağaçta `Return` → seç; `Escape` → kapat.
 
 ### 6.3. Dinamik Formlar
 
@@ -545,6 +568,14 @@ yeni firma/yıl ile tazelenir.
 - Virman/transfer türlerinde satır listesi gizlenir, yerine kaynak-hedef-tutar alanları gelir.
 - Excel benzeri giriş satırı, çift tıklama ile düzenleme, `X` ile satır silme.
 - CurrencyFormatter ile para girişleri otomatik formatlanır.
+- **"Kaydet ve Yeni Fiş" (U1):** tüm fiş formlarında mavi buton — kayıt sonrası form kapanmaz;
+  tarih + ana hesap kalır, fiş no/açıklama/satırlar sıfırlanır, odak fiş no'ya gider, mesaj
+  modal yerine durum çubuğunda, liste arka planda yenilenir. Kayıt metodları
+  `fis_kaydet(yeni_fis=True)` / `kaydet(yeni_fis=True)` parametresiyle çalışır.
+- **Dirty-guard (U2 — `ui/dirty_guard.py`):** forma özel anlık görüntü (üst alan değerleri +
+  satır ağacı imzası). `dirty_kur` `__init__` sonunda, `anlik_yenile` her başarılı kayıt ve
+  reset sonrası, `iptal_onayla` `iptal()`/`kapat()` girişinde. Ağaç alan adı:
+  kasa/banka/cari/çek-senet/açılış → `tree_satirlar`; fatura/fire → `tree`.
 
 ### 6.4. Kaynak Takibi ve "Kaynağa Git"
 
@@ -624,7 +655,7 @@ SQLite bağlantısında `PRAGMA foreign_keys = ON` açıktır (fiş silinince sa
 8. Düzenleme modunda fiş yüklerken KDV hesap satırları (191/391) normal satır listesine alınmaz; kaydederken yeniden üretilir.
 9. KDV kartları (`tur='KDV'`) normal Gider/Gelir lookup'larında gösterilmez (tür filtresi).
 10. Fiş tarihi seçili çalışma yılı dışında olamaz; tüm fiş formları kaydetmeden önce `aktif_yil_kontrolu(...)` ile bunu engeller. Importta dönem dışı satırlar uyarı ile kaydedilir.
-11. **Fiş no tekrarı:** `fis_kaydet`/`fis_guncelle` aynı firma + yıl (+ tarih) içinde mükerrer numarayı `fis_no_kontrol(...)` ile reddeder.
+11. **Fiş no tekrarı:** `fis_kaydet`/`fis_guncelle` aynı firma + yıl (+ tarih) içinde mükerrer numarayı `fis_no_kontrol(...)` ile reddeder. **DB düzeyinde garanti (C7):** `uq_fisler_no_tarih` kısmi UNIQUE index `(fis_no, firma_id, yil, tarih) WHERE fis_no <> ''` — kurulum öncesi ihlal taraması yapılır, ihlal varsa index atlanır + uyarı (startup kırılmaz).
 12. **SQL enjeksiyon whitelist:** `kart_sil`, `kaydet_kart`, `is_kart_kullanilmis_mi` fonksiyonlarına tablo adı yalnızca `GECERLI_KART_TABLOLARI` üzerinden geçer.
 13. **KDV yuvarlama:** Tüm KDV hesabı `utils/formatters.py` içindeki `kdv_hesapla` (Decimal + ROUND_HALF_UP) ile yapılır; elle `round()`/float aritmetiği kullanılmaz.
 14. **Satır içi düzenleme:** Formlarda yeni satır girişi `EditableTreeview` ile yapılır; üst giriş alanı yalnızca yeni satır ekler. KDV % hücresi düzenlenebilir, hesap değişince kart KDV'si otomatik uygulanır, "Toplam (KDV Dahil)" hücresi düzenlenince birim fiyat geri hesaplanır.
@@ -635,8 +666,11 @@ SQLite bağlantısında `PRAGMA foreign_keys = ON` açıktır (fiş silinince sa
 19. **Sayfalama:** Fiş/tanım listelerinde `listele()` tüm kayıtları çekmez; `SayfaliListeMixin` ile `LIMIT/OFFSET` kullanır. Yeni liste ekranı yazarken `_sayfa_query`/`_sayfa_params` + `_diger_sayfa_yukle()` + `_satirlari_ekle()` deseni uygulanmalıdır. Sayfa boyutu `SAYFA_BOYUTU = 50`'dir; yükleme yalnızca gerçek kaydırma olaylarında tetiklenir (periyodik zamanlayıcı kullanılmaz).
 20. **Fiş listesi sorgusu:** Kasa/Banka/Cari gibi `fis_satirlari` ile filtreleyen listelerde `JOIN + DISTINCT` yazılmaz; `f.id IN (SELECT fis_id FROM fis_satirlari WHERE hesap_turu=... )` alt sorgusu tercih edilir (LIMIT öncesi satır şişkinliği/tekilleştirme maliyeti oluşmaz).
 21. **Raporlar lazy yüklenir:** `RaporlarModulu` notebook sekmelerini ilk tıklamada oluşturur; rapor verisi yine yalnızca "Listele / Raporu Getir" ile doldurulur.
-22. **Rapor grupları tek ana sekme altında:** Aynı konudaki raporlar (Stok, ileride Cari/Kasa/Banka…) `*_raporlari_view.py` dosyasında **iç notebook** altında toplanır; ana notebook'ta tek sekme olarak görünür. İç sekmeler de temeldir ve `<<NotebookTabChanged>>` işleyicisi `if event.widget is not self.notebook: return` ile kendi olayını süzer (iç içe notebook'ta üst notebook'un yanlış tetiklenmesini engeller).
+22. **Rapor grupları tek ana sekme altında:** Aynı konudaki raporlar (Stok, Ekstre, Hizmet; Çek/Senet zaten grup) **iç notebook** altında toplanır; ana notebook'ta tek sekme olarak görünür. Ortak taşıyıcı: `alt_sekme_grubu.AltSekmeGrubu(parent, main_app, [(başlık, factory), ...])` — StokRaporlariView deseni genelleştirildi; yeni grup eklerken (plan.md "Kapanış Fişi" sonrası olabilir) ayrıca dosya yazmaya gerek yok, factory listesi yeter. İç sekmeler de temeldir ve `<<NotebookTabChanged>>` işleyicisi `if event.widget is not self.notebook: return` ile kendi olayını süzer (iç içe notebook'ta üst notebook'un yanlış tetiklenmesini engeller).
 23. **Rapor ortak taban sınıfı:** Bir grubun raporları filtre satırını tekrar yazmaz; `stok_rapor_tabani.StokRaporTabani` deseni gibi tek taban sınıftan türetılır (filtre alanları + `stok_sartlari()`/`tarih_araligi()`/`limit()` + Treeview kurulumu + Excel/PDF). Alt sınıf yalnızca `RAPOR_ADI`, `KOLONLAR` ve `listele()` yazar. Hesaplamalar `core/services.py`'de ortak servis olarak durur (`stok_donem_ozeti`, `stok_donem_cogs`); rapor dosyalarında SQL çoğaltılmaz. **Liste üreten raporlarda kart arama/lookup alanı kullanılmaz** — çıktı zaten sıralı liste olduğundan tek ürün istenirse ekstre sekmesine bakılır (lookup yalnızca ekstre gibi tek hesap seçimi zorunlu ekranlarda).
+24. **Dirty-guard + "Kaydet ve Yeni Fiş" sözleşmesi (U1/U2):** İşlem formları taban sınıf KULLANMAZ (plan.md Kararlar); bunun yerine `ui/dirty_guard.py` ortak yardımcıları: her form `__init__` sonunda `dirty_kur(self, alan_adlari, agac_adlari)` çağırır, `iptal()`/`kapat()` girişi `if not iptal_onayla(self): return` kalıbındadır, başarılı kayıt ve yeni-fiş reset'i sonrası `anlik_yenile(self)` çağrılır (kapanışta yeniden sorulmasın). "Kaydet ve Yeni Fiş" butonu `command=lambda: kaydet(yeni_fis=True)` bağlar; başarı yolu modal GÖSTERMEZ — `_yeni_fis_sifirla` (ortak temel: `yeni_fis_temel_sifirla` + formun kendi giriş-satırı temizleyicisi) + `durum_yaz` + liste `yenile()/listele()` + odak fiş no. Yeni form eklerken bu üç nokta eksilmez.
+25. **Import yardımcıları tek kaynakta (Q2):** Excel/CSV içe aktarmada hücre dönüştürücüleri (`metin`/`sayi`/`tarih`/`durum_to_int`) ve ada-göre kart bulucular (`cari_id_bul`, `kasa_id_bul`, `banka_id_bul`, `banka_kurum_id_bul`, `stok_id_bul`, `hizmet_id_bul`) `utils/import_helpers.py`'dadır; `*_import.py` dosyaları bunları `as _metin` vb. takma adlarla içe aktarır — **yeni kopya helper yazılmaz**. Sözleşme: bulunamazsa `None`, birden çok eşleşme `"ambiguous"`, hizmet kartı tür uyuşmazlığı `"wrong_type"`. Map-tabanlı özel aramalar (kasa_import `_kasa_id_bul(map, ad)`, fatura_import `_odeme_hesap_id_bul`) yerel kalabilir.
+26. **Edit yükleme firma kapsamlıdır (C6):** Formların `load_fis_data`/kart-yükleme sorguları `... WHERE id=? AND firma_id=?` kalıbındadır; kart JOIN'leri `LEFT JOIN {tablo} s ON fs.hesap_id = s.id AND s.firma_id=?` (INNER JOIN kullanılmaz — silinmiş kartlı satır sessiz düşer, sil-yeniden-yaz'da kaybolur). `fis_guncelle` başlık güncellemeyince `rowcount==0` → `ValueError` ile satırlara dokunmadan iptal eder; çağıran formlar bu hatayı `showerror` ile kullanıcıya gösterir. `fis_sil`/`fis_guncelle` bağlı fişlerle birlikte `cek_senet_hareketleri` satırlarını da siler (C18 — yetim hareket bırakmaz).
 
 ---
 
@@ -650,8 +684,8 @@ Tamamlanan modüller:
 - Fatura (manuel + Excel import – KDV ayrı satır) + **Fire Fişi**
 - Çek/Senet (manuel + Excel import – Giriş ve Açılış)
 - Tanımlar (manuel + Excel import – Cari, Stok, Hizmet, Kasa, Banka)
-- Ayarlar (Firma Tanımları, Yıl Tanımları, çalışma sırasında firma/yıl değiştirme)
-- Raporlar (**Stok Raporları** ana sekmesi: Stok Durum, Stok Ekstresi, En Çok Satan, Az Satan, Hiç Satış Yapmayan, En Çok Hareket Gören, Kârlılık), Cari/Kasa/Banka Ekstre, Hizmet Kartları + Detay, Çek/Senet Raporları, KDV Raporu, Cari Bakiyeleri, **Kar/Zarar Raporu** — Aylık/Yıllık)
+- Ayarlar (Firma Tanımları, Yıl Tanımları, **Eksi Çalışma politikası**, çalışma sırasında firma/yıl değiştirme)
+- Raporlar (**Stok Raporları** ana sekmesi: Stok Durum, Stok Ekstresi, En Çok Satan, Az Satan, Hiç Satış Yapmayan, En Çok Hareket Gören, Kârlılık), **Ekstre Raporları** (Cari/Kasa/Banka — tek ana sekme), **Hizmet Raporları** (Kartlar + Detay — tek ana sekme), Çek/Senet Raporları, KDV Raporu, Cari Bakiyeleri, **Kar/Zarar Raporu** (Aylık/Yıllık), **Düzeltilecekler**)
 
 Tamamlanan sistemler:
 - **KDV modeli**: 191 İndirilecek / 391 Hesaplanan KDV hesapları otomatik oluşturulur;
@@ -670,15 +704,18 @@ Tamamlanan sistemler:
 - **KDV Raporu**: 191/391 hareketleri, aylık alt toplamlar ve "Ödenecek/Devreden KDV (391 − 191)" farkı.
 - **Stok raporları tek ana sekme altında + 4 yeni stok raporu**: Raporlar notebook'undaki *Stok Durum Raporu* ve *Stok Ekstresi* sekmeleri **Stok Raporları** ana sekmesinin içine (tembel alt sekmeler) alındı; aynı yere **En Çok Satan**, **Az Satan**, **Hiç Satış Yapmayan**, **En Çok Hareket Gören** ve **Kârlılık** raporları eklendi. Ortak altyapı: `stok_rapor_tabani.StokRaporTabani` (tarih aralığı + kategori + durum + limit filtreleri, Excel/PDF; kart arama alanı bilinçli olarak yok). Ortak veri servisi: `core/services.py` → `stok_donem_ozeti()` (fiş türü bazında dönem özeti: hareket sayısı, alış/satış/iade/fire miktar ve tutarları, işlem hacmi, son hareket) ve `stok_donem_cogs()` (kart bazında FIFO maliyet; Kar/Zarar raporundaki FIFO mantığıyla aynı, sadece satış faturası çıkışları). Kâr = net satış tutarı − FIFO maliyet; marj %'si ve TOPLAM satırı raporun altında.
 - **Stok listesi performansı + ortak stok servisi**: Tanımlar → Stok Kartları listesi artık yalnızca `stoklar` tablosunu çekiyor (miktar/maliyet sütunleri ve her aramada çalışan iki `fis_satirlari` tam taraması + FIFO döngüsü kaldırıldı). Bakiye + FIFO kalan maliyet hesabı tek kaynakta: `core/services.py` → `stok_bakiye_ve_maliyet()`; Stok Durum Raporu ve Giriş dashboard'u bu servisi kullanıyor (kopya bloklar silindi).
+- **Eksi Çalışma özelliği (K5 kararı sonrası)**: Ayarlar → Eksi Çalışma sekmesinde firma bazlı politika (izin verme / her seferinde uyar / bir kere uyar / sessiz; varsayılan "bir kere"); fiş kaydında `eksi_dusme_kontrol` + `utils/eksi_uyari.py`; ekstrelerde eksi/maliyetsiz satırlar kırmızı; Raporlar → **Düzeltilecekler** kontrol panosu (hesap/kart başına özet + çift tık fişe git). (Detay: uzman_gorusu.md 🔧 günlüğü.)
+- **Veri bütünlüğü turu (05.09.2026 — uzman görüşü C6/C7/C18/C19)**: edit yüklemeleri firma kapsamlı + `fis_guncelle` rowcount muhafızı + fatura LEFT JOIN firma süzgesi; `uq_fisler_no_tarih` kısmi UNIQUE index (ihlal taramalı güvenli kurulum); `fis_sil`/`fis_guncelle` → `cek_senet_hareketleri` yetim temizliği; sıcak yollarda 5 yeni index.
+- **Günlük UX turu (05.09.2026 — U1/U2/U3/U6/U9)**: 7 fiş formunda **"Kaydet ve Yeni Fiş"** (yerinde reset: tarih+ana hesap kalır, modal yerine durum mesajı); `ui/dirty_guard.py` ile **kaydedilmemiş değişiklik koruması** (form iptali, sekme kapatma, çıkış, firma/yıl değişimi + EditableTreeview geçersiz-hücre balonu); **klavye akışı** (LookupDialog Return/Down/Esc, Alt+harf modül kısayolları, Ctrl+Q); rapor `yenile()` zinciri tembel-sekme-güvenli; çek/senet ve kasa/fatura'daki sessiz `print` hataları messagebox'a dönüştü.
+- **Kod kalitesi (05.09.2026 — Q2 + gruplama + ölü dosya)**: `utils/import_helpers.py` — 6 import dosyasındaki kopya `_metin/_sayi/_tarih` + kart-id bulucular tek kaynakta (sözleşme: None/"ambiguous"/"wrong_type"); `alt_sekme_grubu.AltSekmeGrubu` ile Ekstre ve Hizmet raporları tek ana sekme altında; ölü `stok_raporu_view.py` silindi. İşlem formlarının taban-sınıf birleştirmesi **bilinçli olarak YAPILMADI** (plan.md Kararlar).
 
 Uygulama, tek kullanıcılı yerel ön muhasebe işlemlerini fiş bazlı olarak yönetebilecek durumdadır.
 Tüm modüller Excel import desteğine sahiptir.
 
 **Bekleyen özellikler (detay için `plan.md`):**
+- **Kapanış Fişi** (yıl sonu devri — Kasa/Banka/Cari; rapor bütünlüğü amaçlı, plan.md 🔵).
 - Hesap Taşı (Hizmet Kartları): sağ tık → kayıtları aynı türdeki başka karta taşıma (opsiyonel tarih aralığı).
-- **Refaktoring backlog** (tekrar taraması 30.08.2026 — `plan.md` 🔵): Excel import
-  yardımcıları (`_metin`/`_sayi`/`_tarih` + kart aramaları) → `utils/import_helpers.py`;
-  işlem liste ekranları → `FisListeMixin`; ölü dosya `stok_raporu_view.py` temizliği.
+- **Refaktoring backlog** (güncel — `plan.md` 🔵): kalan tek büyük madde **işlem liste ekranları → `FisListeMixin`**; ayrıca `ui/import_preview.py`'daki 5 kopya preview diyalogu. ~~Excel import yardımcıları~~ ✅ `utils/import_helpers.py` (05.09.2026); ~~ölü dosya `stok_raporu_view.py`~~ ✅ silindi.
   **İşlem formları (kasa/banka/cari/fatura/çek-senet `_form.py`) bilerek ayrı tutuluyor — birleştirme kapsamı dışı.**
 - İsteğe bağlı: "Kayıt Et" tıklanırken açık satır düzenlemesinin otomatik onaylanması; Çek/Senet kolonu için satır içi seçim.
 - Web geçişi (Laravel 13 + Inertia + Vue) **`C:\Users\mehme\Herd\onmuhasebe\docs\GECIS_PLANI.md`** dosyasında

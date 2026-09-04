@@ -44,61 +44,10 @@ SHEET_KOLONLAR = {
 }
 
 
-def _metin(deger):
-    if deger is None:
-        return ""
-    if isinstance(deger, float) and pd is not None and pd.isna(deger):
-        return ""
-    if isinstance(deger, str):
-        return deger.strip()
-    if isinstance(deger, (datetime, date)):
-        return deger.strftime("%d.%m.%Y")
-    return str(deger).strip()
 
 
-def _sayi(deger):
-    if deger is None:
-        return None
-    if isinstance(deger, bool):
-        return None
-    if isinstance(deger, (int, float)):
-        if pd is not None and isinstance(deger, float) and pd.isna(deger):
-            return None
-        return float(deger)
 
-    s = str(deger).strip().replace(" ", "").replace("TL", "").replace("₺", "").replace("%", "")
-    if not s:
-        return None
-
-    if "," in s and "." in s:
-        s = s.replace(".", "").replace(",", ".")
-        try:
-            return float(s)
-        except ValueError:
-            return None
-    if "," in s:
-        s = s.replace(".", "").replace(",", ".")
-        try:
-            return float(s)
-        except ValueError:
-            return None
-    if s.count(".") > 1:
-        s = s.replace(".", "")
-    elif s.count(".") == 1 and len(s.split(".")[1]) == 3:
-        s = s.replace(".", "")
-
-    try:
-        return float(s)
-    except ValueError:
-        return None
-
-
-def _durum_to_int(durum_str):
-    durum_str = _metin(durum_str)
-    if durum_str in ("Pasif", "0", "False"):
-        return 0
-    return 1
-
+from utils.import_helpers import metin as _metin, sayi as _sayi, durum_to_int as _durum_to_int
 
 def tanim_ornek_excel_olustur(dosya_yolu):
     """Cari, Stok ve Hizmet kartları için örnek Excel şablonu oluşturur."""

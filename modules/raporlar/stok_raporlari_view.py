@@ -90,9 +90,11 @@ class StokRaporlariView(tk.Frame):
         return None
 
     def yenile(self):
+        # Tembel sekmelerde nametowidget placeholder döndürür; _sekmeler'den bak
         try:
-            secili = self.inner_notebook.nametowidget(self.inner_notebook.select())
+            baslik = self.inner_notebook.tab(self.inner_notebook.select(), "text")
         except Exception:
             return
-        if hasattr(secili, 'yenile'):
-            secili.yenile()
+        bilgi = self._sekmeler.get(baslik)
+        if bilgi and bilgi[0] and hasattr(bilgi[1], 'yenile'):
+            bilgi[1].yenile()

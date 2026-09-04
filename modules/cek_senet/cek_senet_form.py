@@ -14,6 +14,7 @@ from ui.widgets.lookup_widget import LookupWidget
 from ui.widgets.editable_treeview import EditableTreeview
 from utils.formatters import CurrencyFormatter, parse_currency
 from utils.eksi_uyari import eksi_kontrol_ve_onayla
+from ui.dirty_guard import dirty_kur, anlik_yenile, iptal_onayla, yeni_fis_temel_sifirla
 
 
 class CekSenetFisiFormu(tk.Frame):
@@ -77,6 +78,9 @@ class CekSenetFisiFormu(tk.Frame):
         if self.fis_id:
             self.load_fis_data()
 
+        # U2: kaydedilmemiş değişiklik takibi (temiz anlık durum kaydı)
+        dirty_kur(self, ["ent_tarih", "ent_fis_no", "ent_aciklama", "lookup_cari"], ("tree_satirlar",))
+
     # ---------------------------------------------------------------- UI
     def create_widgets(self):
         ust_frame = tk.Frame(self, bg="#f5f7fb")
@@ -122,6 +126,13 @@ class CekSenetFisiFormu(tk.Frame):
             bg="#198754", fg="white", font=("Arial", 11, "bold"), height=2, width=20,
         )
         self.btn_kaydet.pack(side="right")
+
+        self.btn_kaydet_yeni = tk.Button(
+            alt_buton_frame, text="Kaydet ve Yeni Fiş",
+            command=lambda: self.fis_kaydet(yeni_fis=True),
+            bg="#0d6efd", fg="white", font=("Arial", 11, "bold"), height=2, width=20,
+        )
+        self.btn_kaydet_yeni.pack(side="right", padx=10)
 
         self.btn_iptal = tk.Button(
             alt_buton_frame, text="İptal ve Geri Dön", command=self.iptal,
@@ -247,69 +258,76 @@ class CekSenetFisiFormu(tk.Frame):
 
     # ---------------------------------------------------------------- Veriler
     def verileri_yukle(self):
-        firma_id = self.main_app.aktif_firma_id
-        conn = veritabani_baglan()
-        cursor = conn.cursor()
+        # U9: yükleme hataları artık konsola sessizce düşmez, kullanıcıya gösterilir
+        conn = None
+        try:
+            firma_id = self.main_app.aktif_firma_id
+            conn = veritabani_baglan()
+            cursor = conn.cursor()
 
-        cursor.execute("SELECT id, unvan FROM cariler WHERE durum=1 AND firma_id=?", (firma_id,))
-        self.cari_dict = {row[1]: row[0] for row in cursor.fetchall()}
+            cursor.execute("SELECT id, unvan FROM cariler WHERE durum=1 AND firma_id=?", (firma_id,))
+            self.cari_dict = {row[1]: row[0] for row in cursor.fetchall()}
 
-        cursor.execute("SELECT id, kurum_adi FROM banka_kurumlari WHERE durum=1 AND firma_id=?", (firma_id,))
-        self.banka_kurum_dict = {row[1]: row[0] for row in cursor.fetchall()}
+            cursor.execute("SELECT id, kurum_adi FROM banka_kurumlari WHERE durum=1 AND firma_id=?", (firma_id,))
+            self.banka_kurum_dict = {row[1]: row[0] for row in cursor.fetchall()}
 
-        cursor.execute("SELECT id, hesap_adi FROM banka_hesaplari WHERE durum=1 AND firma_id=?", (firma_id,))
-        self.banka_hesap_dict = {row[1]: row[0] for row in cursor.fetchall()}
+            cursor.execute("SELECT id, hesap_adi FROM banka_hesaplari WHERE durum=1 AND firma_id=?", (firma_id,))
+            self.banka_hesap_dict = {row[1]: row[0] for row in cursor.fetchall()}
 
-        cursor.execute("SELECT id, kasa_adi FROM kasalar WHERE durum=1 AND firma_id=?", (firma_id,))
-        self.kasa_dict = {row[1]: row[0] for row in cursor.fetchall()}
+            cursor.execute("SELECT id, kasa_adi FROM kasalar WHERE durum=1 AND firma_id=?", (firma_id,))
+            self.kasa_dict = {row[1]: row[0] for row in cursor.fetchall()}
 
-        cursor.execute(
-            """
-            SELECT c.id, c.seri_no, c.turu, c.tutar, c.vade_tarihi,
-                   COALESCE(k.kurum_adi, c.banka, '') AS banka_adi,
-                   (SELECT h.durum FROM cek_senet_hareketleri h
-                    WHERE h.cek_senet_id = c.id
-                    ORDER BY h.id DESC LIMIT 1) AS durum
-            FROM cekler_senetler c
-            LEFT JOIN banka_kurumlari k ON c.banka_id = k.id
-            WHERE c.firma_id = ?
-            """,
-            (firma_id,),
-        )
-        self.cek_senet_data = {}
-        for row in cursor.fetchall():
-            cek_id, seri_no, turu, tutar, vade, banka_adi, durum = row
-            self.cek_senet_data[cek_id] = {
-                "id": cek_id,
-                "seri_no": seri_no,
-                "turu": turu,
-                "tutar": tutar,
-                "vade": vade,
-                "banka_adi": banka_adi or "",
-                "durum": durum or "Portföyde",
-                "kaynak_banka_id": None,
-                "kaynak_banka_adi": "",
-            }
+            cursor.execute(
+                """
+                SELECT c.id, c.seri_no, c.turu, c.tutar, c.vade_tarihi,
+                       COALESCE(k.kurum_adi, c.banka, '') AS banka_adi,
+                       (SELECT h.durum FROM cek_senet_hareketleri h
+                        WHERE h.cek_senet_id = c.id
+                        ORDER BY h.id DESC LIMIT 1) AS durum
+                FROM cekler_senetler c
+                LEFT JOIN banka_kurumlari k ON c.banka_id = k.id
+                WHERE c.firma_id = ?
+                """,
+                (firma_id,),
+            )
+            self.cek_senet_data = {}
+            for row in cursor.fetchall():
+                cek_id, seri_no, turu, tutar, vade, banka_adi, durum = row
+                self.cek_senet_data[cek_id] = {
+                    "id": cek_id,
+                    "seri_no": seri_no,
+                    "turu": turu,
+                    "tutar": tutar,
+                    "vade": vade,
+                    "banka_adi": banka_adi or "",
+                    "durum": durum or "Portföyde",
+                    "kaynak_banka_id": None,
+                    "kaynak_banka_adi": "",
+                }
 
-        # Bankada Tahsilde olan çek/senetler için son banka takas hesabını da yükle
-        cursor.execute(
-            """
-            SELECT h.cek_senet_id, h.karsi_hesap_id, h.karsi_hesap_ismi
-            FROM cek_senet_hareketleri h
-            WHERE h.durum = 'Bankada Tahsilde'
-              AND h.id = (
-                  SELECT MAX(h2.id) FROM cek_senet_hareketleri h2
-                  WHERE h2.cek_senet_id = h.cek_senet_id
-                    AND h2.durum = 'Bankada Tahsilde'
-              )
-            """
-        )
-        for cek_id, banka_id, banka_adi in cursor.fetchall():
-            if cek_id in self.cek_senet_data:
-                self.cek_senet_data[cek_id]["kaynak_banka_id"] = banka_id
-                self.cek_senet_data[cek_id]["kaynak_banka_adi"] = banka_adi or ""
-
-        conn.close()
+            # Bankada Tahsilde olan çek/senetler için son banka takas hesabını da yükle
+            cursor.execute(
+                """
+                SELECT h.cek_senet_id, h.karsi_hesap_id, h.karsi_hesap_ismi
+                FROM cek_senet_hareketleri h
+                WHERE h.durum = 'Bankada Tahsilde'
+                  AND h.id = (
+                      SELECT MAX(h2.id) FROM cek_senet_hareketleri h2
+                      WHERE h2.cek_senet_id = h.cek_senet_id
+                        AND h2.durum = 'Bankada Tahsilde'
+                  )
+                """
+            )
+            for cek_id, banka_id, banka_adi in cursor.fetchall():
+                if cek_id in self.cek_senet_data:
+                    self.cek_senet_data[cek_id]["kaynak_banka_id"] = banka_id
+                    self.cek_senet_data[cek_id]["kaynak_banka_adi"] = banka_adi or ""
+        except Exception as e:
+            messagebox.showerror("Veri Yükleme Hatası",
+                                 f"Çek/Senet verileri yüklenemedi:\n{e}", parent=self)
+        finally:
+            if conn:
+                conn.close()
 
     # ---------------------------------------------------------------- Dinamik form
     def ayarla_form_yapisi(self):
@@ -630,7 +648,7 @@ class CekSenetFisiFormu(tk.Frame):
             self.tree_satirlar.delete(item_id_to_delete)
             del self.satirlar[item_id_to_delete]
         except KeyError:
-            print(f"Satır {item_id_to_delete} bulunamadı.")
+            pass  # satır zaten listeden düşmüş — sessizce yoksay
         self.guncelle_toplamlari()
         self._tahsil_ayarlari_guncelle()
 
@@ -701,7 +719,17 @@ class CekSenetFisiFormu(tk.Frame):
     # ---------------------------------------------------------------- Kaydet
     def _durum_kontrol(self, cek_id, sonuc_durumu):
         """Yeni fişte ön durumu, düzenlemede sonuç durumunu kontrol eder."""
-        mevcut = self.cek_senet_data[cek_id]["durum"]
+        # U9: eksik kart (silinmiş/yeniden yüklenmemiş) KeyError yerine görünür uyarı
+        veri = self.cek_senet_data.get(cek_id)
+        if veri is None:
+            messagebox.showwarning(
+                "Kayıp Kart",
+                "Fiş satırındaki çek/senet kartı artık mevcut değil (silinmiş olabilir).\n"
+                "Satırı kaldırıp fişi yeniden düzenleyin.",
+                parent=self,
+            )
+            return False
+        mevcut = veri["durum"]
         if self.fis_id:
             return mevcut == sonuc_durumu
 
@@ -723,6 +751,16 @@ class CekSenetFisiFormu(tk.Frame):
         if self.fis_id and self.tahsil_onceki_durum:
             return self.tahsil_onceki_durum
 
+        eksik = [s["cek_senet_id"] for s in self.satirlar.values()
+                 if s["cek_senet_id"] not in self.cek_senet_data]
+        if eksik:
+            # U9: KeyError yerine görünür uyarı
+            messagebox.showwarning(
+                "Kayıp Kart",
+                "Fişteki bazı çek/senet kartları artık mevcut değil (silinmiş olabilir).",
+                parent=self,
+            )
+            return None
         durumlar = [self.cek_senet_data[s["cek_senet_id"]]["durum"] for s in self.satirlar.values()]
         ilk = durumlar[0]
         if not all(d == ilk for d in durumlar):
@@ -735,7 +773,7 @@ class CekSenetFisiFormu(tk.Frame):
             return None
         return ilk
 
-    def fis_kaydet(self):
+    def fis_kaydet(self, yeni_fis=False):
         # Dönem dışı tarih engeli
         yil_hata = aktif_yil_kontrolu(self.ent_tarih.get_date(), self.main_app.aktif_yil)
         if yil_hata:
@@ -1093,7 +1131,7 @@ class CekSenetFisiFormu(tk.Frame):
                             UPDATE cekler_senetler
                             SET seri_no=?, turu=?, banka_id=?, vade_tarihi=?, tutar=?,
                                 kesideci=?, ciranta=?, aciklama=?
-                            WHERE id=?
+                            WHERE id=? AND firma_id=?
                             """,
                             (
                                 satir["seri_no"],
@@ -1105,6 +1143,7 @@ class CekSenetFisiFormu(tk.Frame):
                                 satir.get("ciranta", ""),
                                 satir.get("aciklama", ""),
                                 cek_id,
+                                firma_id,
                             ),
                         )
                     yeni_cek_ids.append(cek_id)
@@ -1163,8 +1202,12 @@ class CekSenetFisiFormu(tk.Frame):
                 )
 
             conn.commit()
-            messagebox.showinfo("Başarılı", mesaj, parent=self)
-            self.iptal()
+            if yeni_fis:
+                self._yeni_fis_sifirla(mesaj)
+            else:
+                messagebox.showinfo("Başarılı", mesaj, parent=self)
+                anlik_yenile(self)  # U2: kayıt temizlendi
+                self.iptal()
             if self.view_container:
                 self.view_container.yenile()
         except Exception as e:
@@ -1181,7 +1224,8 @@ class CekSenetFisiFormu(tk.Frame):
             conn = veritabani_baglan()
             cursor = conn.cursor()
 
-            cursor.execute("SELECT * FROM fisler WHERE id=?", (self.fis_id,))
+            cursor.execute("SELECT * FROM fisler WHERE id=? AND firma_id=?",
+                           (self.fis_id, self.main_app.aktif_firma_id))
             baslik = cursor.fetchone()
             if not baslik:
                 messagebox.showerror("Hata", "Fiş bulunamadı.", parent=self)
@@ -1333,12 +1377,26 @@ class CekSenetFisiFormu(tk.Frame):
             messagebox.showerror("Veri Yükleme Hatası", f"Fiş bilgileri yüklenemedi: {e}", parent=self)
             self.iptal()
 
+    def _yeni_fis_sifirla(self, basarili_mesaj=None):
+        """U1: Kaydet ve Yeni Fiş — formu boş yeni fiş moduna alır (tarih/cari/işlem alanları korunur)."""
+        yeni_fis_temel_sifirla(self)
+        self._tahsil_onceki_durum = None
+        self.temizle_giris_satiri()  # giriş satırı alanlarını türüne göre temizler
+        anlik_yenile(self)
+        if hasattr(self.main_app, "durum_yaz"):
+            self.main_app.durum_yaz(basarili_mesaj or "Fiş kaydedildi — yeni fiş için form hazır.")
+        self.ent_fis_no.focus_set()
+
     def iptal(self):
+        # U2: kirlilik varsa önce sorar
+        if not iptal_onayla(self):
+            return False
         self.pack_forget()
         if self.on_close:
             self.on_close()
         if self.view_container:
             self.view_container.pack(fill="both", expand=True)
+        return True
 
     def yenile(self):
         if self.view_container:

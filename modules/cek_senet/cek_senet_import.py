@@ -51,47 +51,10 @@ CEK_SENET_IMPORT_KOLONLARI = [
 ZORUNLU_KOLONLAR = ["Fiş Türü", "Tarih", "Seri No", "Tutar"]
 
 
-def _metin(deger):
-    if deger is None: return ""
-    if isinstance(deger, float) and pd is not None and pd.isna(deger): return ""
-    if isinstance(deger, str): return deger.strip()
-    if isinstance(deger, (datetime, date)): return deger.strftime("%d.%m.%Y")
-    return str(deger).strip()
 
 
-def _sayi(deger):
-    if deger is None: return None
-    if isinstance(deger, bool): return None
-    if isinstance(deger, (int, float)):
-        if pd is not None and isinstance(deger, float) and pd.isna(deger): return None
-        return float(deger)
-    s = str(deger).strip().replace(" ", "").replace("TL", "").replace("₺", "").replace("%", "")
-    if not s: return None
-    if "," in s and "." in s:
-        s = s.replace(".", "").replace(",", ".")
-        try: return float(s)
-        except ValueError: return None
-    if "," in s:
-        s = s.replace(".", "").replace(",", ".")
-        try: return float(s)
-        except ValueError: return None
-    if s.count(".") > 1: s = s.replace(".", "")
-    elif s.count(".") == 1 and len(s.split(".")[1]) == 3: s = s.replace(".", "")
-    try: return float(s)
-    except ValueError: return None
 
-
-def _tarih(deger):
-    if deger is None: return None
-    if isinstance(deger, datetime): return deger.strftime("%Y-%m-%d")
-    if isinstance(deger, date): return deger.strftime("%Y-%m-%d")
-    s = str(deger).strip()
-    if not s: return None
-    for fmt in ("%d.%m.%Y", "%d.%m.%y", "%d/%m/%Y", "%d/%m/%y", "%Y-%m-%d", "%Y/%m/%d"):
-        try: return datetime.strptime(s, fmt).strftime("%Y-%m-%d")
-        except ValueError: continue
-    return None
-
+from utils.import_helpers import metin as _metin, sayi as _sayi, tarih as _tarih, cari_id_bul as _cari_id_bul, banka_kurum_id_bul as _banka_kurum_id_bul
 
 def cek_senet_ornek_excel_olustur(dosya_yolu):
     if pd is None:
@@ -157,22 +120,6 @@ def cek_senet_excel_oku(dosya_yolu):
     return satirlar
 
 
-def _cari_id_bul(cursor, unvan, firma_id):
-    if not unvan: return None
-    cursor.execute("SELECT id FROM cariler WHERE durum=1 AND firma_id=? AND unvan=?", (firma_id, unvan))
-    rows = cursor.fetchall()
-    if not rows: return None
-    if len(rows) > 1: return "ambiguous"
-    return rows[0][0]
-
-
-def _banka_kurum_id_bul(cursor, ad, firma_id):
-    if not ad: return None
-    cursor.execute("SELECT id FROM banka_kurumlari WHERE durum=1 AND firma_id=? AND kurum_adi=?", (firma_id, ad))
-    rows = cursor.fetchall()
-    if not rows: return None
-    if len(rows) > 1: return "ambiguous"
-    return rows[0][0]
 
 
 def _cek_senet_seri_no_kontrol(cursor, seri_no, firma_id):

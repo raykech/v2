@@ -9,6 +9,7 @@ from ui.dialogs import ac_kart_dialog
 from ui.widgets.lookup_widget import LookupWidget, LookupDialog
 from ui.widgets.editable_treeview import EditableTreeview
 from utils.formatters import CurrencyFormatter, parse_currency
+from ui.dirty_guard import dirty_kur, anlik_yenile, iptal_onayla, yeni_fis_temel_sifirla
 
 
 class AcilisFisiFormu(tk.Frame):
@@ -55,6 +56,9 @@ class AcilisFisiFormu(tk.Frame):
         self.verileri_yukle()
         if self.fis_id:
             self.load_fis_data()
+
+        # U2: kaydedilmemiş değişiklik takibi (temiz anlık durum kaydı)
+        dirty_kur(self, ["ent_tarih", "ent_fis_no", "ent_aciklama"], ("tree_satirlar",))
 
     # ---------------------------------------------------------------- UI
     def create_widgets(self):
@@ -191,6 +195,13 @@ class AcilisFisiFormu(tk.Frame):
         )
         self.btn_kaydet.pack(side="right")
 
+        self.btn_kaydet_yeni = tk.Button(
+            alt_buton_frame, text="Kaydet ve Yeni Fiş",
+            command=lambda: self.fis_kaydet(yeni_fis=True),
+            bg="#0d6efd", fg="white", font=("Arial", 11, "bold"), height=2, width=20,
+        )
+        self.btn_kaydet_yeni.pack(side="right", padx=10)
+
         self.btn_iptal = tk.Button(
             alt_buton_frame, text="İptal ve Geri Dön", command=self.iptal,
             bg="#6c757d", fg="white", font=("Arial", 11, "bold"), height=2, width=20,
@@ -272,7 +283,7 @@ class AcilisFisiFormu(tk.Frame):
             self.tree_satirlar.delete(item_id_to_delete)
             del self.satirlar[item_id_to_delete]
         except KeyError:
-            print(f"Satır {item_id_to_delete} bulunamadı.")
+            pass  # satır zaten listeden düşmüş — sessizce yoksay
         self.guncelle_toplamlari()
 
     def on_tree_click(self, event):
@@ -386,7 +397,7 @@ class AcilisFisiFormu(tk.Frame):
             "kdv_tutar": 0,
         }
 
-    def fis_kaydet(self):
+    def fis_kaydet(self, yeni_fis=False):
         # Dönem dışı tarih engeli
         yil_hata = aktif_yil_kontrolu(self.ent_tarih.get_date(), self.main_app.aktif_yil)
         if yil_hata:
@@ -422,8 +433,12 @@ class AcilisFisiFormu(tk.Frame):
                 fis_kaydet(cursor, fis_baslik, fis_satirlari, kaynak_modul=self.kaynak_modul)
                 mesaj = "Açılış fişi başarıyla kaydedildi."
             conn.commit()
-            messagebox.showinfo("Başarılı", mesaj, parent=self)
-            self.iptal()
+            if yeni_fis:
+                self._yeni_fis_sifirla(mesaj)
+            else:
+                messagebox.showinfo("Başarılı", mesaj, parent=self)
+                anlik_yenile(self)  # U2: kayıt temizlendi
+                self.iptal()
             if self.view_container:
                 self.view_container.yenile()
         except Exception as e:
@@ -439,7 +454,8 @@ class AcilisFisiFormu(tk.Frame):
         try:
             conn = veritabani_baglan()
             cursor = conn.cursor()
-            cursor.execute("SELECT tarih, fis_no, aciklama FROM fisler WHERE id=?", (self.fis_id,))
+            cursor.execute("SELECT tarih, fis_no, aciklama FROM fisler WHERE id=? AND firma_id=?",
+                           (self.fis_id, self.main_app.aktif_firma_id))
             baslik = cursor.fetchone()
             if not baslik:
                 messagebox.showerror("Hata", "Fiş bulunamadı.", parent=self)
@@ -484,12 +500,29 @@ class AcilisFisiFormu(tk.Frame):
             self.iptal()
 
     # ---------------------------------------------------------------- Ortak
+    def _yeni_fis_sifirla(self, basarili_mesaj=None):
+        """U1: Kaydet ve Yeni Fiş — formu boş yeni fiş moduna alır (tarih korunur)."""
+        yeni_fis_temel_sifirla(self)
+        self.lookup_hesap.clear()
+        self.ent_yon.set(self.YON_BORC)
+        self.ent_satir_aciklama.delete(0, "end")
+        self.ent_tutar.delete(0, "end")
+        self.guncelle_toplamlari()
+        anlik_yenile(self)
+        if hasattr(self.main_app, "durum_yaz"):
+            self.main_app.durum_yaz(basarili_mesaj or "Açılış fişi kaydedildi — yeni fiş için form hazır.")
+        self.ent_fis_no.focus_set()
+
     def iptal(self):
+        # U2: kirlilik varsa önce sorar
+        if not iptal_onayla(self):
+            return False
         self.pack_forget()
         if self.on_close:
             self.on_close()
         if self.view_container:
             self.view_container.pack(fill="both", expand=True)
+        return True
 
     def yenile(self):
         if self.view_container:

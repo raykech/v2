@@ -9,6 +9,45 @@ Bölümler: 🟢 Tamamlandı · 🟠 Kararlar · 🔵 İleride Yapılacaklar · 
 
 ## 🟢 Tamamlandı
 
+### 05.09.2026 Turu — Sağlamlık + Günlük UX + Kod Kalitesi (uzman görüşü maddeleri)
+- **C6 — edit yüklemeleri firma kapsamlı:** tüm fiş formlarının `load_fis_data` okumaları
+  `AND firma_id=?`; `fis_guncelle` başlık güncellemeyince `rowcount==0` → `ValueError` ile
+  hiçbir satıra dokunmadan iptal; fatura edit JOIN'leri `LEFT JOIN ... AND s.firma_id=?`
+  (silinmiş kartlı satırlar artık sessiz düşmüyor); çek/senet kart UPDATE'i firma kapsamlı.
+- **C7 — fiş no DB garantisi:** `uq_fisler_no_tarih` kısmi UNIQUE index
+  `(fis_no, firma_id, yil, tarih) WHERE fis_no <> ''`; kurulumdan önce ihlal taraması —
+  bozuk veri varsa index atlanır + uyarı (startup kırılmaz).
+- **C18 — yetim hareket temizliği:** `fis_sil` ve `fis_guncelle` artık bağlı fişlerle birlikte
+  `cek_senet_hareketleri` satırlarını da siliyor.
+- **C19 — sıcak yol index'leri:** `fis_satirlari(fis_id)`, `fisler(kaynak_fis_id)`,
+  `cek_senet_hareketleri(fis_id)` + `(cek_senet_id, islem_tarihi)`, `genel_tanimlar(grup, firma_id)`.
+- **U1 — "Kaydet ve Yeni Fiş":** 7 fiş formunda mavi buton; `fis_kaydet(yeni_fis=True)` /
+  `kaydet(yeni_fis=True)` — kayıt yerinde sıfırlanır (tarih + ana hesap kalır), modal yerine
+  durum çubuğu mesajı, liste arka planda yenilenir, odak fiş no'da.
+  Ortak reset: `ui/dirty_guard.py:yeni_fis_temel_sifirla` + form helper'ları.
+- **U2 — dirty-guard (`ui/dirty_guard.py` yeni):** form anlık görüntüsü (başlık alanları +
+  satır ağacı); `dirty_kur` kuruluşta, `anlik_yenile` her kayıt/reset'te, `iptal_onayla`
+  kapanışta sorar. Ana pencere: sekme kapatma, çıkış ve firma/yıl değişimi kirli form
+  varken onaylıyor. EditableTreeview geçersiz hücreyi artık sarı balonla söylüyor.
+- **U3 — klavye akışı:** LookupDialog tam klavye (Return=seç/geç, Down=ağaç, Esc=kapat);
+  menülerde Alt+T/K/C/F/B/S/R/Y modül kısayolları + Ctrl+Q çıkış; accelerator etiketleri.
+  Form-level Return/Esc bilinçli yok (Kararlar'a yazıldı).
+- **U6 — rapor yenileme zinciri:** `RaporlarModulu.yenile()` / `StokRaporlariView.yenile()`
+  tembel-sekme-güvenli (sözlükten lookup) — görünen sekmenin `yenile()`'ine delege.
+- **U9 — sessiz hatalar → messagebox:** çek/senet `verileri_yukle` try/except + "Kayıp Kart"
+  uyarıları; kasa/fatura `print` hata yolları `showerror`.
+- **Q2 — import helper birleştirme:** `utils/import_helpers.py` (yeni) — 6 import dosyasındaki
+  kopya `_metin/_sayi/_tarih` + kart-id bulucular tek kaynaktan (`as _metin` takma adlarıyla,
+  çağrı noktaları değişmedi). Backlog madde 1 KAPANDI.
+- **Rapor gruplaması (Stok Raporları "sonraki adım"ı uygulandı):** `alt_sekme_grubu.py` (yeni,
+  StokRaporlariView deseni genelleştirildi) — Raporlar'da artık **Ekstre Raporları**
+  (Cari/Kasa/Banka) ve **Hizmet Raporları** (Kartlar + Detay) tek ana sekme altında; iç sekmeler
+  tembel. Raporlar sekme sayısı 8.
+- **Ölü dosya silindi:** `modules/raporlar/stok_raporu_view.py` (backlog madde 3 KAPANDI).
+- **Doğrulama:** compileall temiz; servis smoke'ları (rowcount muhafızı, yetim temizliği,
+  import sözleşmeleri None/ambiguous/wrong_type); GUI smoke'ları (8 modül açılışı, 7 form
+  kirlilik/reset/tree, rapor grupları tembel + yenile). **Commit yapılmadı — kullanıcıda.**
+
 ### Raporlar — Stok Raporları grubu ve 4 yeni stok raporu (30.08.2026)
 - **Stok Raporları ana sekmesi** (`modules/raporlar/stok_raporlari_view.py`): Raporlar
   notebook'undaki *Stok Durum Raporu* ve *Stok Ekstresi* sekmeleri iç notebook altına
@@ -42,8 +81,9 @@ Bölümler: 🟢 Tamamlandı · 🟠 Kararlar · 🔵 İleride Yapılacaklar · 
 - **Doğrulama:** Servis toplamları ham SQL ile birebir (2025 satış tutarı 314.910,66 TL);
   FIFO maliyet satış çıkışları 191.494,77 TL, tüm çıkışlar 201.131,19 TL (fire/iade farkı).
   Tüm alt sekmeler Tkinter duman testinde üretildi ve `listele()` hatasız çalıştı.
-- **Sonraki adım (kullanıcı planı):** aynı gruplama diğer raporlara (Cari, Kasa/Banka
-  ekstreleri, Hizmet, Çek/Senet zaten grup) da aynı desenle uygulanacak.
+- **Sonraki adım (kullanıcı planı):** ~~aynı gruplama diğer raporlara da uygulanacak~~
+  **UYGULANDI (05.09.2026):** desen `alt_sekme_grubu.AltSekmeGrubu` olarak genelleştirildi;
+  Ekstre (Cari/Kasa/Banka) ve Hizmet (Kartlar+Detay) tek ana sekme altında.
 
 ### Performans — Stok listesi ve ortak stok servisi (30.08.2026)
 - **Tanımlar → Stok Kartları listesi sadeleştirildi:** "Mevcut Miktar" ve "Maliyet Değeri"
@@ -103,11 +143,29 @@ Bölümler: 🟢 Tamamlandı · 🟠 Kararlar · 🔵 İleride Yapılacaklar · 
 
 ## 🟠 Kararlar (kullanıcı onaylı)
 
+### Peşin/nakit satışlar cariye yansıtılmaz (uzman görüşü C1 — karara bağlandı 04.09.2026)
+- Faturada ödeme tipi **Peşin/Nakit** ise cari karşılık satırı üretilmez; karşı taraf
+  fişte doğrudan seçilen Kasa/Bankadır. Cari satırı **yalnız Vadeli** faturalarda oluşur
+  (mevcut davranış — `fatura_form.py:772`).
+- Gerekçe: her nakit çalışan müşteri/tedarikçi için cari kart açmak pratik değil.
+  Nakit satışın cari ekstrede görünmemesi eksik değil, tasarımdır.
+
+### Açılış fişleri tek taraflı kalır — mizan mantığı YOK (uzman görüşü C17 — karara bağlandı 04.09.2026)
+- Burası ön muhasebe; küresel mizan/590 karşıt satır modeli **bilinçli olarak yok**.
+  Her modül kendi devrini gösterir: kasa açılışı borç 1.000 TL ise tüm raporlarda tek
+  başına görünür — bu doğru davranıştır. Açılış fişlerine dokunulmayacak;
+  `_denge_kontrolu`'nun Cari-satırı-olmayanları denetlememesi de bu kararla tutarlı.
+
 ### İşlem formları BİLEREK ayrı tutuluyor
 - `kasa_form` / `banka_form` / `cari_form` / `fatura_form` / `cek_senet_form` arasındaki
   benzerlik (~%71) **bilinçli bir tasarım tercihidir**; ortak bir form taban sınıfına
   taşınmayacak. Her modülün fiş giriş davranışı kendine özgü evrilebilir.
   Tekrar taramalarında bu dosyalar "birleştirme adayı" olarak önerilmez.
+
+### Form-seviyesi Return=Kaydet / Esc=İptal BİLEREK yok (U3 kararı — 05.09.2026)
+- Fiş formlarında çok alan + EditableTreeview hücre düzenleme akışı var; `bind_all("<Escape>")`
+  LookupDialog'un Escape binding'i ile çakışırdı. Klavye kazancı LookupDialog (tam klavye) +
+  menü kısayolları (Alt+harf, Ctrl+Q) tarafında sağlandı; form kapanışı `iptal_onayla` ile korunuyor.
 
 ### Hizmet kartı türü kilidi (uygulandı — `hizmet_view.py`)
 - **İşlem görmüş bir hizmet kartının Tür'ü (Gider/Gelir) değiştirilemez.**
@@ -123,25 +181,20 @@ Bölümler: 🟢 Tamamlandı · 🟠 Kararlar · 🔵 İleride Yapılacaklar · 
 ### Refaktoring backlog — tekrar eden kod taraması (30.08.2026)
 Tekrar taramasında bulunan kopya bloklar (işlem formları kapsam dışı — bkz. Kararlar):
 
-1. **Excel import yardımcıları — yüksek kazanç / düşük risk**
-   - `_metin`, `_sayi`, `_tarih` (~60'ar satır) **5-6 dosyada birebir kopya**:
-     `kasa_import`, `banka_import`, `cari_import`, `fatura_import`, `cek_senet_import`, `tanim_import`.
-   - Kart arama fonksiyonları da kopya: `_cari_id_bul` ×4, `_hizmet_id_bul` ×3,
-     `_kasa_id_bul` ×2, `_banka_id_bul` ×2.
-   - İnce farklar parametreyle birleştirilmeli: banka'nın `_banka_id_bul`'ında fazladan
-     `hesap_turu` parametresi; `kasa_import` cursor yerine önceden kurulmuş map kullanıyor.
-   - **Öneri:** `utils/import_helpers.py` altında topla (~300 satır erir).
+1. ~~**Excel import yardımcıları**~~ ✅ **TAMAMLANDI (05.09.2026):** `utils/import_helpers.py` kuruldu;
+   6 import dosyasındaki `_metin/_sayi/_tarih` + kart-id bulucular silinip takma adlı içe aktarımla
+   bağlandı (çağrı noktaları değişmedi). Yerel kalanlar (bilinçli): `kasa_import` map-tabanlı
+   `_kasa_id_bul`/`_hizmet_karti_bul`, `fatura_import` `_odeme_hesap_id_bul`.
+   **Kalan iş:** `ui/import_preview.py`'daki 5 yapısal-kopya preview diyalogu (~90'ar satır) —
+   ayrı birleştirme işi, henüz yapılmadı.
 2. **İşlem liste ekranları — yüksek kazanç / orta risk**
    - `modules/{kasa,banka,cari,fatura,cek_senet}/*_view.py` arası benzerlik:
      kasa↔banka ~%95 (356/377 benzersiz satır ortak), diğer ikililer %62–67.
    - Tekrar eden bloklar: fiş listeleme sorgusu (aynı `SELECT f.id, ... FROM fisler f` +
      WHERE kurulumu), `_satirlari_ekle`, `filtreleri_temizle`, `ornek_indir`, `veri_yukle` sarmalayıcısı.
    - **Öneri:** `FisListeMixin` taban sınıfı; kart filtresi ve `satir_filtreleri` hook olarak kalır.
-     UI refactor — elle test gerektirir, import helper'larından sonra sıraya alınmalı.
-3. **Ölü dosya temizliği**
-   - `modules/raporlar/stok_raporu_view.py` hiçbir yerden import edilmiyor
-     (canlı rapor: `stok_durum_raporu_view.py`; `__projev2.md` §2 notunda da geçiyor).
-   - Kullanıcı onayıyla silinecek.
+     UI refactor — elle test gerektirir; sıradaki tek büyük backlog maddesi.
+3. ~~**Ölü dosya temizliği**~~ ✅ **TAMAMLANDI (05.09.2026):** `modules/raporlar/stok_raporu_view.py` silindi.
 4. **Cüceler — düşük öncelik**
    - `SELECT deger FROM genel_tanimlar WHERE grup='Yillar' ORDER BY deger DESC` ×3
      (`__main__.py:83`, `ui/dialogs.py:969`, `yil_tanimlari_view.py:63`) → `yil_listesi_getir(cursor)` yardımcısı.
@@ -149,6 +202,21 @@ Tekrar taramasında bulunan kopya bloklar (işlem formları kapsam dışı — b
      (`tanimlar/stok_view.py` ×2 + `stok_durum_raporu_view.py`) → `genel_tanim_sozlugu(cursor, grup, firma_id)`.
    - `tanimlar/*_view.py` ailesi ~%50 yapısal benzerlik (form + liste + kaydet/sil iskeleti) —
      taban sınıf adayı ama işlem view'larına göre daha az kopya içeriyor; en sona bırakılabilir.
+
+### Kapanış Fişi (yıl sonu devri) — bekleyen özellik (C17 kararıyla bağlantılı, 04.09.2026 notu)
+- **Neden:** Yıl kapanışı olmadığından geçmiş yıl bakiyeleri yeni yıla devretmiyor;
+  Kasa/Banka raporları ve Cari Ekstre yeni yılda sıfırdan başlıyor.
+- **Amaç:** Muhasebe kaydı değil — **rapor bütünlüğü**: yıl sonu bakiyelerinin sonraki
+  yılın raporlarında kesintisiz görünmesi.
+- **İşleyiş (her modüle bir kapanış fişi):**
+  - Örnek **Kasa**: tüm kasa kartlarının yıl sonu bakiyesini **ters hesap** ederek
+    kapatan bir fiş üretir (29.12 tarihi) **ve** sonraki yılın ilk günü için
+    **Açılış Fişini otomatik oluşturur** (devir bakiyesiyle, kaynak = kapanış).
+  - Aynı desen **Banka** ve **Cari** için (cari: borç/alacak yönüyle), istenirse Stok
+    (miktar+birim maliyet devri — FIFO katmanlarının yeni yıla taşınması ayrı inceleme).
+- **Dikkat:** Tekrar çalıştırma korunmalı (aynı yıl iki kez kapanış = çift devir);
+  kapanış fişleri düzenlemeye/silmeye kapalı olmalı ya da silince açılışı da temizlemeli;
+  dönem sonu bakiyesi hesapları mevcut rapor servisiyle aynı olmalı.
 
 ### Hesap Taşı (Hizmet Kartları) — bekleyen özellik
 - **Amaç:** İşlem görmüş bir kartın türü kilitli olduğu için, kayıtları başka bir karta
@@ -213,14 +281,21 @@ olduğu gibi takip edilmelidir.
      # EN SON: self._setup_hesap_lookup()  (kasa_form.py'deki pattern)
      if self.fis_id:
          self.load_fis_data()
+     # EN SON: dirty takibi (U2)
+     dirty_kur(self, ["ent_tarih", "ent_fis_no", "ent_aciklama"], ("tree_satirlar",))
      ```
+   - **U2 (dirty-guard):** `from ui.dirty_guard import dirty_kur, anlik_yenile, iptal_onayla` —
+     `__init__` en sonuna `dirty_kur(self, alan_adlari, agac_adlari)` (fiş türüne göre
+     virman/ana-hesap alanlarını listeye ekleyin; ağaç adı kasa/banka/cari/çek/acilis:
+     `tree_satirlar`, fatura/fire: `tree`); `iptal()` girişi `if not iptal_onayla(self): return`;
+     başarılı kayıttan sonra `anlik_yenile(self)` (kapanışta yeniden sormasın).
    - **create_widgets() içinde:**
      - Üst başlık alanı (Fiş Türü, Ana Hesap LookupWidget, Tarih, Fiş No, Açıklama)
      - Virman gibi özel fiş türleri için gizli alanlar (`lbl_hedef_...`, `lookup_hedef_...`, `lbl_virman_tutar`, `ent_virman_tutar`)
      - Excel tarzı giriş satırı (LookupWidget hesap, açıklama, miktar, birim_fiyat, kdv_oran, satır toplamı, "+" buton)
      - Treeview satır listesi (çift tık = düzenle, son sütun ❌ = sil)
      - Toplamlar alanı (Ara Toplam, Toplam KDV, Genel Toplam)
-     - Alt butonlar (Kaydet, İptal ve Geri Dön)
+     - Alt butonlar (Kaydet, **Kaydet ve Yeni Fiş** `bg="#0d6efd"`, İptal ve Geri Dön)
    - **Kritik Metotlar:**
      - `_setup_hesap_lookup()` — StringVar trace + set patch + fokus davranışı (kasa_form.py'den birebir kopyala)
      - `_on_hesap_select()` — Hizmet kartı seçilince KDV'yi otomatik doldur
