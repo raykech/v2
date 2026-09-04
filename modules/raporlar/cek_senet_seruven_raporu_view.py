@@ -95,7 +95,7 @@ class CekSenetSeruvenRaporuView(tk.Frame):
                 FROM cek_senet_hareketleri h
                 LEFT JOIN fisler f ON f.id = h.fis_id
                 WHERE h.cek_senet_id = ?
-                ORDER BY h.id
+                ORDER BY h.islem_tarihi, h.id
                 """,
                 (cek_id,),
             )

@@ -8,6 +8,7 @@ from ui.dialogs import ac_kart_dialog
 from ui.widgets.lookup_widget import LookupWidget, LookupDialog
 from ui.widgets.editable_treeview import EditableTreeview
 from utils.formatters import CurrencyFormatter, parse_currency, format_miktar, kdv_hesapla
+from utils.eksi_uyari import eksi_kontrol_ve_onayla
 
 
 class KasaFisiFormu(tk.Frame):
@@ -772,18 +773,25 @@ class KasaFisiFormu(tk.Frame):
                 # KDV ayrı satır olarak eklenir (191 İndirilecek KDV / 391 Hesaplanan KDV)
                 if satir.get('kdv_tutar'):
                     kdv_hesap_id = self.indirilecek_kdv_id if is_gider else self.hesaplanan_kdv_id
-                    if kdv_hesap_id:
-                        fis_satirlari.append({
-                            "hesap_turu": "Hizmet",
-                            "hesap_id": kdv_hesap_id,
-                            "borc": satir['kdv_tutar'] if is_gider else 0,
-                            "alacak": 0 if is_gider else satir['kdv_tutar'],
-                            "aciklama": f"{'İndirilecek' if is_gider else 'Hesaplanan'} KDV",
-                            "miktar": 1,
-                            "birim_fiyat": satir['kdv_tutar'],
-                            "kdv_oran": 0,
-                            "kdv_tutar": 0
-                        })
+                    if not kdv_hesap_id:
+                        messagebox.showerror(
+                            "KDV Kartı Eksik",
+                            f"Bu fişte KDV var ancak {'191 İndirilecek' if is_gider else '391 Hesaplanan'} "
+                            "KDV kartı tanımlı değil.\n\n"
+                            "Kartlar bölümünden türü 'KDV' olan ilgili kartı tanımlayın (fiş dengesiz kaydedilemez).",
+                            parent=self)
+                        return
+                    fis_satirlari.append({
+                        "hesap_turu": "Hizmet",
+                        "hesap_id": kdv_hesap_id,
+                        "borc": satir['kdv_tutar'] if is_gider else 0,
+                        "alacak": 0 if is_gider else satir['kdv_tutar'],
+                        "aciklama": f"{'İndirilecek' if is_gider else 'Hesaplanan'} KDV",
+                        "miktar": 1,
+                        "birim_fiyat": satir['kdv_tutar'],
+                        "kdv_oran": 0,
+                        "kdv_tutar": 0
+                    })
 
             fis_satirlari.append({
                 "hesap_turu": "Kasa",
@@ -801,6 +809,13 @@ class KasaFisiFormu(tk.Frame):
         try:
             conn = veritabani_baglan()
             cursor = conn.cursor()
+
+            # Eksi bakiye kontrolü — ayara göre uyar/engelle (Adım 2)
+            if not eksi_kontrol_ve_onayla(
+                self, cursor, self.main_app.aktif_firma_id, fis_satirlari,
+                guncellenen_fis_id=self.fis_id,
+            ):
+                return
 
             if self.fis_id:
                 fis_guncelle(cursor, self.fis_id, fis_baslik, fis_satirlari, kaynak_modul='Kasa')

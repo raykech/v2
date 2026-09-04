@@ -6,6 +6,7 @@ import uuid
 from core.db import veritabani_baglan
 from core.services import fis_kaydet, fis_guncelle, aktif_yil_kontrolu
 from utils.formatters import format_currency, parse_currency, CurrencyFormatter
+from utils.eksi_uyari import eksi_kontrol_ve_onayla
 from ui.widgets.lookup_widget import LookupWidget, LookupDialog
 from ui.dialogs import ac_kart_dialog
 
@@ -333,6 +334,12 @@ class FaturaFireFormu(tk.Frame):
         try:
             conn = veritabani_baglan()
             cursor = conn.cursor()
+            # Stok eksi kontrolü — ayara göre uyar/engelle (Adım 2)
+            if not eksi_kontrol_ve_onayla(
+                self, cursor, self.main_app.aktif_firma_id, fis_satirlari,
+                guncellenen_fis_id=self.fis_id,
+            ):
+                return
             if self.fis_id:
                 fis_guncelle(cursor, self.fis_id, fis_data, fis_satirlari, pesin_odeme_data=None, kaynak_modul='Fatura')
             else:

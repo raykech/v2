@@ -105,8 +105,10 @@ class CekSenetPortfoyRaporuView(tk.Frame):
                 SELECT h.cek_senet_id, h.durum
                 FROM cek_senet_hareketleri h
                 WHERE h.id = (
-                    SELECT MAX(h2.id) FROM cek_senet_hareketleri h2
+                    SELECT h2.id FROM cek_senet_hareketleri h2
                     WHERE h2.cek_senet_id = h.cek_senet_id
+                    ORDER BY h2.islem_tarihi DESC, h2.id DESC
+                    LIMIT 1
                 )
             ) guncel_durum ON guncel_durum.cek_senet_id = c.id
             WHERE {" AND ".join(where)}

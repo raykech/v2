@@ -13,6 +13,7 @@ from ui.dialogs import ac_kart_dialog
 from ui.widgets.lookup_widget import LookupWidget
 from ui.widgets.editable_treeview import EditableTreeview
 from utils.formatters import CurrencyFormatter, parse_currency
+from utils.eksi_uyari import eksi_kontrol_ve_onayla
 
 
 class CekSenetFisiFormu(tk.Frame):
@@ -1051,6 +1052,13 @@ class CekSenetFisiFormu(tk.Frame):
         try:
             conn = veritabani_baglan()
             cursor = conn.cursor()
+
+            # Eksi kasa/banka kontrolü — ayara göre uyar/engelle (Adım 2)
+            if not eksi_kontrol_ve_onayla(
+                self, cursor, firma_id, fis_satirlari,
+                guncellenen_fis_id=self.fis_id,
+            ):
+                return
 
             # Yeni çek/senet kayıtlarını ve ID'leri belirle
             if self.fis_turu in (self.GIRIS_FISI, self.ACILIS_FISI):

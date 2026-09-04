@@ -1,7 +1,7 @@
 # Python
 __pycache__/
-__eski_dökümanlar__/
-tests/
+docs/
+__importlar
 *.py[cod]
 
 # Virtual Environment

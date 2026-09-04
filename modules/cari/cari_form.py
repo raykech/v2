@@ -8,6 +8,7 @@ from ui.dialogs import ac_kart_dialog
 from ui.widgets.lookup_widget import LookupWidget, LookupDialog
 from ui.widgets.editable_treeview import EditableTreeview
 from utils.formatters import CurrencyFormatter, parse_currency
+from utils.eksi_uyari import eksi_kontrol_ve_onayla
 
 
 class CariFisiFormu(tk.Frame):
@@ -524,6 +525,13 @@ class CariFisiFormu(tk.Frame):
         try:
             conn = veritabani_baglan()
             cursor = conn.cursor()
+
+            # Eksi kasa/banka kontrolü — ayara göre uyar/engelle (Adım 2)
+            if not eksi_kontrol_ve_onayla(
+                self, cursor, self.main_app.aktif_firma_id, fis_satirlari,
+                guncellenen_fis_id=self.fis_id,
+            ):
+                return
 
             if self.fis_id:
                 fis_guncelle(cursor, self.fis_id, fis_baslik, fis_satirlari, kaynak_modul='Cari')

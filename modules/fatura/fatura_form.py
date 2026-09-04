@@ -6,6 +6,7 @@ import uuid
 from core.db import veritabani_baglan
 from core.services import fis_kaydet, fis_guncelle, kdv_satiri_olustur, aktif_yil_kontrolu
 from utils.formatters import format_currency, parse_currency, CurrencyFormatter, format_miktar, kdv_hesapla
+from utils.eksi_uyari import eksi_kontrol_ve_onayla
 from ui.widgets.lookup_widget import LookupWidget, LookupDialog
 from ui.widgets.editable_treeview import EditableTreeview
 from ui.dialogs import ac_kart_dialog
@@ -750,6 +751,14 @@ class FaturaFormu(tk.Frame):
             if kdv_tutar:
                 line_borclu = satir.get('borc', 0) > 0
                 kdv_hesap_id = self.indirilecek_kdv_id if line_borclu else self.hesaplanan_kdv_id
+                if not kdv_hesap_id:
+                    messagebox.showerror(
+                        "KDV Kartı Eksik",
+                        f"Bu {self.fis_turu} fişinde KDV var ancak "
+                        f"{'191 İndirilecek' if line_borclu else '391 Hesaplanan'} KDV kartı tanımlı değil.\n\n"
+                        "Kartlar bölümünden türü 'KDV' olan ilgili kartı tanımlayın (fiş dengesiz kaydedilemez).",
+                        parent=self)
+                    return
                 kdv_satiri = kdv_satiri_olustur(
                     kdv_hesap_id, kdv_tutar,
                     yon='borc' if line_borclu else 'alacak',
@@ -818,6 +827,12 @@ class FaturaFormu(tk.Frame):
         try:
             conn = veritabani_baglan()
             cursor = conn.cursor()
+            # Stok eksi kontrolü — ayara göre uyar/engelle (Adım 2)
+            if not eksi_kontrol_ve_onayla(
+                self, cursor, self.main_app.aktif_firma_id, fis_satirlari,
+                guncellenen_fis_id=self.fis_id,
+            ):
+                return
             if self.fis_id:
                 fis_guncelle(cursor, self.fis_id, fis_data, fis_satirlari, pesin_odeme_data, kaynak_modul='Fatura')
             else:
@@ -880,8 +895,9 @@ class FaturaFormu(tk.Frame):
                 ara_toplam, kdv_tutar, toplam_tutar = kdv_hesapla(satir_dict['miktar'], satir_dict['birim_fiyat'], satir_dict['kdv_oran'])
                 
                 # satir_ekle ile aynı mantık: Satış → alacaklı; Alış → borçlu; Satış İade → borçlu; Alış İade → alacaklı
+                # satir_ekle ile aynı şekilde satır tutarı NET'tir (ara_toplam); KDV ayrı satır olarak kaydedilir
                 is_line_credit = not (("Satış" in self.fis_turu and "İade" in self.fis_turu) or ("Satış" not in self.fis_turu and "İade" not in self.fis_turu))
-                borc, alacak = (0, toplam_tutar) if is_line_credit else (toplam_tutar, 0)
+                borc, alacak = (0, ara_toplam) if is_line_credit else (ara_toplam, 0)
 
                 self.satirlar[satir_id] = {
                     'hesap_turu': hesap_turu_filter, 'hesap_id': satir_dict['hesap_id'], 'stok_adi': satir_dict['hesap_adi'],

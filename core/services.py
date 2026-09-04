@@ -26,11 +26,32 @@ def fis_no_kontrol(cursor, fis_no, firma_id, yil, fis_id=None, tarih=None):
     return cursor.fetchone()[0] == 0
 
 
+def _denge_kontrolu(fis_satirlari):
+    """
+    Cari karşılığı olan fişlarda borç=alacak dengesi zorunlu (K2).
+    Cari satırı içermeyen fişler (peşin fatura/tahsilat/ödeme, virman, açılış)
+    tasarım gereği tek taraflıdır; kontrol dışıdır.
+    Tolerans 0,01 TL (float biriktirme payı).
+    """
+    if not any(s.get('hesap_turu') == 'Cari' for s in fis_satirlari):
+        return
+    fark = sum(float(s.get('borc') or 0) for s in fis_satirlari) \
+         - sum(float(s.get('alacak') or 0) for s in fis_satirlari)
+    if abs(fark) > 0.01:
+        raise ValueError(
+            f"Fiş dengeli değil: borç-alacak farkı {fark:+,.2f} TL. "
+            "Lütfen satır tutarlarını kontrol edin."
+        )
+
+
 def fis_kaydet(cursor, fis_baslik, fis_satirlari, pesin_odeme_data=None, kaynak_modul=None):
     """
     Yeni bir fişi (başlık ve satırlar) ve varsa peşin ödeme fişini veritabanına kaydeder.
     Tüm işlemler tek bir transaction içinde yapılır.
     """
+    # Dengesiz fiş hiçbir yazım yapılmadan reddedilir (K2)
+    _denge_kontrolu(fis_satirlari)
+
     # Aynı firma, yıl ve tarih içinde fiş numarası tekrarı olmamalı
     fis_no = str(fis_baslik.get('fis_no') or '').strip()
     if fis_no and not fis_no_kontrol(cursor, fis_no, fis_baslik['firma_id'], fis_baslik['yil'], tarih=fis_baslik.get('tarih')):
@@ -90,6 +111,9 @@ def fis_guncelle(cursor, fis_id, fis_baslik, fis_satirlari, pesin_odeme_data=Non
     """
     Mevcut bir fişi (başlık ve satırlar) ve varsa peşin ödeme fişini günceller.
     """
+    # Dengesiz fiş hiçbir yazım/silme yapılmadan reddedilir (K2)
+    _denge_kontrolu(fis_satirlari)
+
     # Aynı firma, yıl ve tarih içinde fiş numarası tekrarı olmamalı (kendi fişi hariç)
     fis_no = str(fis_baslik.get('fis_no') or '').strip()
     if fis_no and not fis_no_kontrol(cursor, fis_no, fis_baslik['firma_id'], fis_baslik['yil'], fis_id=fis_id, tarih=fis_baslik.get('tarih')):
@@ -512,7 +536,7 @@ def kdv_satiri_olustur(kdv_hesap_id, kdv_tutar, yon, aciklama=""):
 def cek_senet_guncel_durum(cursor, cek_senet_id):
     """Bir çek/senedin en son hareketine göre güncel durumunu döndürür."""
     cursor.execute(
-        "SELECT durum FROM cek_senet_hareketleri WHERE cek_senet_id = ? ORDER BY id DESC LIMIT 1",
+        "SELECT durum FROM cek_senet_hareketleri WHERE cek_senet_id = ? ORDER BY islem_tarihi DESC, id DESC LIMIT 1",
         (cek_senet_id,),
     )
     row = cursor.fetchone()
@@ -526,7 +550,7 @@ def cek_senet_son_banka_takas(cursor, cek_senet_id):
         SELECT karsi_hesap_id, karsi_hesap_ismi
         FROM cek_senet_hareketleri
         WHERE cek_senet_id = ? AND durum = 'Bankada Tahsilde'
-        ORDER BY id DESC LIMIT 1
+        ORDER BY islem_tarihi DESC, id DESC LIMIT 1
         """,
         (cek_senet_id,),
     )
@@ -543,7 +567,7 @@ def cek_senet_fis_son_hareket_mi(cursor, fis_id):
         SELECT COUNT(*)
         FROM cek_senet_hareketleri h
         WHERE h.fis_id = ?
-          AND h.id < (SELECT MAX(id) FROM cek_senet_hareketleri WHERE cek_senet_id = h.cek_senet_id)
+          AND h.id <> (SELECT h2.id FROM cek_senet_hareketleri h2 WHERE h2.cek_senet_id = h.cek_senet_id ORDER BY h2.islem_tarihi DESC, h2.id DESC LIMIT 1)
         """,
         (fis_id,),
     )
@@ -618,3 +642,283 @@ def cek_senet_fis_sil(cursor, fis_id, firma_id):
             )
             if cursor.fetchone()[0] == 0:
                 cursor.execute("DELETE FROM cekler_senetler WHERE id = ?", (cek_senet_id,))
+
+
+# ---------------------------------------------------------------- Firma bazlı ayar deposu
+# Ayarlar 'genel_tanimlar' tablosunda tutulur: grup=anahtar, deger=seçenek,
+# firma_id ile firma bazlı ayrılır. Bu, "Eksi Çalışma" gibi anahtar/değer
+# niteliğindeki tercihler için ortak bir okuma/yazma arayüzü sağlar.
+def ayar_oku(cursor, firma_id, anahtar, varsayilan=None):
+    """Firma bazlı bir ayar değeri okur; yoksa varsayilanı döndürür."""
+    cursor.execute(
+        "SELECT deger FROM genel_tanimlar WHERE grup = ? AND firma_id = ? LIMIT 1",
+        (anahtar, firma_id),
+    )
+    row = cursor.fetchone()
+    return row[0] if row and row[0] is not None else varsayilan
+
+
+def ayar_yaz(cursor, firma_id, anahtar, deger):
+    """Firma bazlı bir ayar değerini (varsa güncelleyerek) yazar."""
+    cursor.execute(
+        "SELECT id FROM genel_tanimlar WHERE grup = ? AND firma_id = ? LIMIT 1",
+        (anahtar, firma_id),
+    )
+    row = cursor.fetchone()
+    if row:
+        cursor.execute(
+            "UPDATE genel_tanimlar SET deger = ? WHERE id = ?", (deger, row[0])
+        )
+    else:
+        cursor.execute(
+            "INSERT INTO genel_tanimlar (grup, deger, firma_id) VALUES (?, ?, ?)",
+            (anahtar, deger, firma_id),
+        )
+
+
+# ---------------------------------------------------------------- "Eksi Çalışma" politikaları
+# Kasa/banka/stok bir fiş sonrası eksiye düştüğünde ne olacağını belirler.
+# Muhasebe akışını kırmamak için varsayılan "uyar ama izin ver" davranışıdır.
+EKSI_POLITIKA_SECENEKLERI = [
+    ("İzin verme (kayıtı engelle)", "izin_verme"),
+    ("Her seferinde uyar (yine de kaydet)", "her_seferinde_uyar"),
+    ("Bir kere uyar (sonra sessiz kaydet)", "bir_kere_uyar"),
+    ("Hiçbir şey yapma (sessiz kaydet)", "hicbir_sey_yapma"),
+]
+EKSI_POLITIKA_VARSAYILAN = "bir_kere_uyar"
+
+# Stok eksiye düştüğünde çıkışın maliyeti fiyatlama olarak 0 kabul edilir
+# (karşılıksız çıkış = maliyetsiz). Rapor/Düzeltilecekler bunu kırmızı işaretler.
+
+# Ayar anahtarları
+AYAR_EKSI_KASA = "eksi_kasa"
+AYAR_EKSI_BANKA = "eksi_banka"
+AYAR_EKSI_STOK = "eksi_stok"
+
+
+# ---------------------------------------------------------------- "Eksiye düşme" tespiti
+def _hesap_adi(cursor, hesap_turu, hesap_id):
+    """Kasa/Banka/Stok kartının görünen adını döndürür (mesajlar için)."""
+    tablo_kolon = {
+        "Kasa": ("kasalar", "kasa_adi"),
+        "Banka": ("banka_hesaplari", "hesap_adi"),
+        "Stok": ("stoklar", "stok_adi"),
+    }.get(hesap_turu)
+    if not tablo_kolon:
+        return f"{hesap_turu} #{hesap_id}"
+    tablo, kolon = tablo_kolon
+    cursor.execute(f"SELECT {kolon} FROM {tablo} WHERE id = ?", (hesap_id,))
+    row = cursor.fetchone()
+    return row[0] if row and row[0] else f"{hesap_turu} #{hesap_id}"
+
+
+def eksi_dusme_kontrol(cursor, firma_id, fis_satirlari, guncellenen_fis_id=None):
+    """
+    Kaydedilecek/güncellenecek bir fişten sonra hangi hesapların eksiye
+    düştüğünü belirler (fiş henüz yazılmamış olarak çağrılır).
+
+    - Kasa / Banka: net bakiye = borç - alacak (₺). Sonuç < 0 → sorun.
+    - Stok: net miktar = giriş(borç) - çıkış(alacak) (miktar). Sonuç < 0 → sorun.
+
+    Güncellemede, kartın ESKİ hâli sayılmasın diye `guncellenen_fis_id` hariç
+    tutulur. Dönüş: eksiye düşen hesapların listesi; her öğe
+    {'tur','hesap_id','hesap_adi','deger','birim'}. Liste boşsa sorun yok.
+    """
+    para_turleri = {"Kasa", "Banka"}
+    hedef_turleri = para_turleri | {"Stok"}
+
+    # Fiş satırlarını (tur, hesap_id) bazında topla
+    delta = {}
+    for s in fis_satirlari:
+        tur = s.get("hesap_turu")
+        if tur not in hedef_turleri:
+            continue
+        hid = s.get("hesap_id")
+        if hid is None:
+            continue
+        d = delta.setdefault((tur, hid), 0.0)
+        if tur in para_turleri:
+            delta[(tur, hid)] = d + float(s.get("borc") or 0) - float(s.get("alacak") or 0)
+        else:  # Stok: miktar, yönlü
+            miktar = float(s.get("miktar") or 0)
+            if float(s.get("borc") or 0) > 0:
+                delta[(tur, hid)] = d + miktar
+            elif float(s.get("alacak") or 0) > 0:
+                delta[(tur, hid)] = d - miktar
+
+    if not delta:
+        return []
+
+    haric = " AND fis_id <> ?" if guncellenen_fis_id else ""
+    ex_params = [guncellenen_fis_id] if guncellenen_fis_id else []
+
+    offenders = []
+    for (tur, hid), d in delta.items():
+        if tur in para_turleri:
+            cursor.execute(
+                f"""SELECT COALESCE(SUM(borc - alacak), 0) FROM fis_satirlari
+                    WHERE hesap_turu = ? AND hesap_id = ? AND firma_id = ?{haric}""",
+                [tur, hid, firma_id] + ex_params,
+            )
+            bakiye = (cursor.fetchone()[0] or 0.0) + d
+            deger, birim = bakiye, "₺"
+        else:  # Stok
+            cursor.execute(
+                f"""SELECT COALESCE(SUM(CASE WHEN borc > 0 THEN miktar
+                                             WHEN alacak > 0 THEN -miktar
+                                             ELSE 0 END), 0)
+                    FROM fis_satirlari
+                    WHERE hesap_turu = 'Stok' AND hesap_id = ? AND firma_id = ?{haric}""",
+                [hid, firma_id] + ex_params,
+            )
+            deger, birim = (cursor.fetchone()[0] or 0.0) + d, "adet"
+
+        if deger < -0.01:
+            offenders.append({
+                "tur": tur,
+                "hesap_id": hid,
+                "hesap_adi": _hesap_adi(cursor, tur, hid),
+                "deger": deger,
+                "birim": birim,
+            })
+    return offenders
+
+
+def _para_sorunlari(cursor, firma_id, hesap_turu, hesaplar, bas_tarih, bit_tarih):
+    """Kasa/Banka hesapları için DÖNEM SONU bakiyesi eksi olan hesapları,
+    hesap başına tek özet satırı olarak döndürür.
+    (Satış/ödeme önce girilip sonra düzelmiş ara eksiler 'düzeltilmesi gereken'
+    sayılmaz — kullanıcı kararı: yalnız dönem sonu eksi.)"""
+    sonuc = []
+    for hid, ad in hesaplar:
+        cursor.execute(
+            """SELECT f.tarih, f.id, fs.borc, fs.alacak
+               FROM fis_satirlari fs JOIN fisler f ON f.id = fs.fis_id
+               WHERE fs.hesap_turu=? AND fs.hesap_id=? AND fs.firma_id=?
+               ORDER BY f.tarih, f.id""",
+            (hesap_turu, hid, firma_id),
+        )
+        bakiye = 0.0
+        eksi_satir = 0
+        ilk_tarih = None
+        ilk_fis = None
+        for tarih, fis_id, borc, alacak in cursor.fetchall():
+            delta = (borc or 0) - (alacak or 0)
+            if tarih < bas_tarih:
+                bakiye += delta
+                continue
+            if bit_tarih and tarih > bit_tarih:
+                break
+            bakiye += delta
+            if bakiye < -0.01:
+                eksi_satir += 1
+                if ilk_tarih is None:
+                    ilk_tarih, ilk_fis = tarih, fis_id
+        if bakiye < -0.01:  # yalnız dönem sonu eksi
+            sonuc.append({
+                "tur": hesap_turu, "hesap_id": hid, "hesap_adi": ad,
+                "ilk_tarih": ilk_tarih, "eksi_satir": eksi_satir,
+                "donem_sonu": bakiye, "maliyetsiz": None,
+                "birim": "₺", "ilk_fis_id": ilk_fis,
+            })
+    sonuc.sort(key=lambda r: (r["ilk_tarih"] or "", r["hesap_adi"]))
+    return sonuc
+
+
+def _stok_sorunlari(cursor, firma_id, bas_tarih, bit_tarih):
+    """Stok kartları için, kart başına tek özet satırı. Bir kart 'sorunlu' sayılır
+    eğer: (a) dönem sonu miktarı eksi (gerçek açık) VEYA (b) dönem içinde
+    maliyetsiz satış var (satış, alıştan önce girildiği için 0 maliyetle hesaplandı
+    — miktar sonradan düzeltilse bile Kar/Zarar maliyeti eksik kalır)."""
+    cursor.execute(
+        "SELECT id, stok_adi FROM stoklar WHERE durum=1 AND firma_id=?", (firma_id,)
+    )
+    kartlar = cursor.fetchall()
+    sonuc = []
+    for hid, ad in kartlar:
+        cursor.execute(
+            """SELECT f.tarih, f.id, fs.miktar, fs.borc, fs.alacak, fs.birim_fiyat
+               FROM fis_satirlari fs JOIN fisler f ON f.id = fs.fis_id
+               WHERE fs.hesap_turu='Stok' AND fs.hesap_id=? AND fs.firma_id=?
+               ORDER BY f.tarih, f.id""",
+            (hid, firma_id),
+        )
+        katmanlar = []          # FIFO: [kalan_miktar, birim_fiyat]
+        kalan = 0.0             # dönem sonu/şu an net miktar
+        eksi_satir = 0
+        maliyetsiz = 0.0        # karşılıksız (0 maliyetle) satılan toplam miktar
+        ilk_tarih = None
+        ilk_fis = None
+        for tarih, fis_id, miktar, borc, alacak, bf in cursor.fetchall():
+            miktar = miktar or 0.0
+            bf = bf or 0.0
+            donem_icinde = bas_tarih <= tarih and not (bit_tarih and tarih > bit_tarih)
+            if (borc or 0) > 0:
+                delta = miktar
+                katmanlar.append([miktar, bf])
+            elif (alacak or 0) > 0:
+                delta = -miktar
+                # Her çıkış FIFO katmanlarını tüketir (devir dahil), gerçek COGS
+                # motoru gibi. Yalnız dönem İÇİNDEKI karşılıksız çıkışlar
+                # 'maliyetsiz' olarak sayılır.
+                tuketilen = 0.0
+                kalan_istek = miktar
+                while kalan_istek > 0 and katmanlar:
+                    k = katmanlar[0]
+                    ku = min(kalan_istek, k[0])
+                    k[0] -= ku
+                    kalan_istek -= ku
+                    tuketilen += ku
+                    if k[0] <= 0:
+                        katmanlar.pop(0)
+                eksik = miktar - tuketilen
+                if donem_icinde and eksik > 0.001:
+                    maliyetsiz += eksik
+                    if ilk_tarih is None:
+                        ilk_tarih, ilk_fis = tarih, fis_id
+            else:
+                continue
+
+            onceki_kalan = kalan
+            kalan += delta
+            if tarih < bas_tarih:
+                continue
+            if bit_tarih and tarih > bit_tarih:
+                break
+            if kalan < -0.01 and onceki_kalan >= -0.01:
+                eksi_satir += 1
+                if ilk_tarih is None:
+                    ilk_tarih, ilk_fis = tarih, fis_id
+
+        if kalan < -0.01 or maliyetsiz > 0.01:
+            sonuc.append({
+                "tur": "Stok", "hesap_id": hid, "hesap_adi": ad,
+                "ilk_tarih": ilk_tarih, "eksi_satir": eksi_satir,
+                "donem_sonu": kalan, "maliyetsiz": maliyetsiz,
+                "birim": "adet", "ilk_fis_id": ilk_fis,
+            })
+    sonuc.sort(key=lambda r: (r["ilk_tarih"] or "", r["hesap_adi"]))
+    return sonuc
+
+
+def eksi_duzeltilecekler(cursor, firma_id, bas_tarih, bit_tarih=None):
+    """'Düzeltilecekler' raporu: seçili dönemde sorunlu KASA/BANKA/STOK
+    hesap/kartları — her biri için TEK özet satırı.
+      • Kasa/Banka: dönem sonu bakiyesi eksi olan hesaplar.
+      • Stok: dönem sonu miktarı eksi VEYA maliyetsiz satış içeren kartlar.
+    Dönüş: {'Kasa':[...], 'Banka':[...], 'Stok':[...]}."""
+    def _hesaplar(tablo, ad_kolon):
+        cursor.execute(
+            f"SELECT id, {ad_kolon} FROM {tablo} WHERE durum=1 AND firma_id=?",
+            (firma_id,),
+        )
+        return cursor.fetchall()
+
+    kasa = _para_sorunlari(
+        cursor, firma_id, "Kasa", _hesaplar("kasalar", "kasa_adi"), bas_tarih, bit_tarih
+    )
+    banka = _para_sorunlari(
+        cursor, firma_id, "Banka", _hesaplar("banka_hesaplari", "hesap_adi"), bas_tarih, bit_tarih
+    )
+    stok = _stok_sorunlari(cursor, firma_id, bas_tarih, bit_tarih)
+    return {"Kasa": kasa, "Banka": banka, "Stok": stok}

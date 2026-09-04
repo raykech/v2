@@ -3,6 +3,7 @@ from tkinter import ttk
 
 from .firma_tanimlari_view import FirmaTanimlariView
 from .yil_tanimlari_view import YilTanimlariView
+from .eksi_calisma_view import EksiCalismaView
 
 
 class AyarlarModulu(tk.Frame):
@@ -22,6 +23,9 @@ class AyarlarModulu(tk.Frame):
 
         self.yil_tanimlari_tab = YilTanimlariView(self.notebook, self.main_app)
         self.notebook.add(self.yil_tanimlari_tab, text="Yıl Tanımları")
+
+        self.eksi_calisma_tab = EksiCalismaView(self.notebook, self.main_app)
+        self.notebook.add(self.eksi_calisma_tab, text="Eksi Çalışma")
 
     def yenile(self):
         selected = self.notebook.nametowidget(self.notebook.select())

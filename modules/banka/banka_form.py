@@ -8,6 +8,7 @@ from ui.dialogs import ac_kart_dialog
 from ui.widgets.lookup_widget import LookupWidget, LookupDialog
 from ui.widgets.editable_treeview import EditableTreeview
 from utils.formatters import CurrencyFormatter, parse_currency, format_miktar, kdv_hesapla
+from utils.eksi_uyari import eksi_kontrol_ve_onayla
 
 
 class BankaFisiFormu(tk.Frame):
@@ -310,6 +311,16 @@ class BankaFisiFormu(tk.Frame):
             f"[{row[2]}] {row[1]}": {"id": row[0], "tur": row[2], "kdv_oran": row[3] if row[3] is not None else 20}
             for row in cursor.fetchall()
         }
+
+        # KDV hesap ID'lerini bul (tur='KDV' olanlar: 191 İndirilecek / 391 Hesaplanan)
+        self.indirilecek_kdv_id = None
+        self.hesaplanan_kdv_id = None
+        for key, val in self.hizmet_dict.items():
+            if val["tur"] == "KDV":
+                if "191" in key or "İndirilecek" in key:
+                    self.indirilecek_kdv_id = val["id"]
+                elif "391" in key or "Hesaplanan" in key:
+                    self.hesaplanan_kdv_id = val["id"]
 
         cursor.execute("SELECT id, hesap_adi, hesap_turu FROM banka_hesaplari WHERE durum=1 AND firma_id=?", (firma_id,))
         banka_rows = cursor.fetchall()
@@ -744,6 +755,28 @@ class BankaFisiFormu(tk.Frame):
                     "kdv_oran": satir['kdv_oran'],
                     "kdv_tutar": satir['kdv_tutar']
                 })
+                # KDV ayrı satır (191 İndirilecek / 391 Hesaplanan) — kasa ile aynı desen
+                if satir.get('kdv_tutar'):
+                    kdv_hesap_id = self.indirilecek_kdv_id if is_gider else self.hesaplanan_kdv_id
+                    if not kdv_hesap_id:
+                        messagebox.showerror(
+                            "KDV Kartı Eksik",
+                            f"Bu fişte KDV var ancak {'191 İndirilecek' if is_gider else '391 Hesaplanan'} "
+                            "KDV kartı tanımlı değil.\n\n"
+                            "Kartlar bölümünden türü 'KDV' olan ilgili kartı tanımlayın (fiş dengesiz kaydedilemez).",
+                            parent=self)
+                        return
+                    fis_satirlari.append({
+                        "hesap_turu": "Hizmet",
+                        "hesap_id": kdv_hesap_id,
+                        "borc": satir['kdv_tutar'] if is_gider else 0,
+                        "alacak": 0 if is_gider else satir['kdv_tutar'],
+                        "aciklama": f"{'İndirilecek' if is_gider else 'Hesaplanan'} KDV",
+                        "miktar": 1,
+                        "birim_fiyat": satir['kdv_tutar'],
+                        "kdv_oran": 0,
+                        "kdv_tutar": 0
+                    })
 
             fis_satirlari.append({
                 "hesap_turu": "Banka",
@@ -761,6 +794,13 @@ class BankaFisiFormu(tk.Frame):
         try:
             conn = veritabani_baglan()
             cursor = conn.cursor()
+
+            # Eksi bakiye kontrolü — ayara göre uyar/engelle (Adım 2)
+            if not eksi_kontrol_ve_onayla(
+                self, cursor, self.main_app.aktif_firma_id, fis_satirlari,
+                guncellenen_fis_id=self.fis_id,
+            ):
+                return
 
             if self.fis_id:
                 fis_guncelle(cursor, self.fis_id, fis_baslik, fis_satirlari, kaynak_modul='Banka')

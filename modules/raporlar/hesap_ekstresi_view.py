@@ -107,6 +107,8 @@ class HesapEkstresiView(tk.Frame):
         self.tree.tag_configure('toplam', font=('Arial', 9, 'bold'))
         self.tree.tag_configure('bakiye', font=('Arial', 10, 'bold'), background='#d1e7dd')
         self.tree.tag_configure('separator', background='#cccccc')
+        # Eksi bakiye/miktar satırları kırmızı (Adım 3)
+        self.tree.tag_configure('eksi', background='#f8d7da', foreground='#842029')
 
         # Sağ tık → ilgili fişe git (Kaynağa Git)
         self.tree.bind("<Button-3>", self._sag_tik_menu)
@@ -232,6 +234,7 @@ class HesapEkstresiView(tk.Frame):
                 # Gösterilen/navigasyon ID'si: fişin kaynağı varsa kaynak fişin id'si
                 # (örn. peşin ödeme → asıl fatura), yoksa fişin kendi id'si.
                 hedef_id = kaynak_fis_id if kaynak_fis_id else fis_id
+                _eksi = bakiye < 0 and self.hesap_turu in ("Kasa", "Banka")
                 iid = self.tree.insert("", "end", values=(
                     hedef_id,
                     format_date(tarih),
@@ -241,7 +244,7 @@ class HesapEkstresiView(tk.Frame):
                     format_currency(borc),
                     format_currency(alacak),
                     format_currency(bakiye)
-                ))
+                ), tags=('eksi',) if _eksi else ())
                 self._satir_fis_map[iid] = hedef_id
                 self._satir_ham_fis_map[iid] = fis_id
                 toplam_borc += borc
@@ -340,12 +343,14 @@ class HesapEkstresiView(tk.Frame):
             toplam_cikis_tutar += cikis_tutar
 
             hedef_id = kaynak_fis_id if kaynak_fis_id else fis_id
+            # Kırmızı: stok eksiye düştüyse VEYA çıkışın karşılığı katman yoksa (maliyet 0)
+            _eksi = kalan_miktar < -0.001 or (cikis_miktar > 0 and abs(cikis_tutar) < 0.001)
             iid = self.tree.insert("", "end", values=(
                 hedef_id, format_date(tarih), fis_no, fis_turu, aciklama,
                 format_miktar(giris_miktar), format_currency(giris_tutar),
                 format_miktar(cikis_miktar), format_currency(cikis_tutar),
                 format_miktar(kalan_miktar), format_currency(kalan_maliyet)
-            ))
+            ), tags=('eksi',) if _eksi else ())
             self._satir_fis_map[iid] = hedef_id
             self._satir_ham_fis_map[iid] = fis_id
 

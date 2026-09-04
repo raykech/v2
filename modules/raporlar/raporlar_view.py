@@ -26,6 +26,7 @@ class RaporlarModulu(tk.Frame):
             ("KDV Raporu", "kdv"),
             ("Cari Bakiyeleri", "cari_bakiye"),
             ("Kar/Zarar Raporu", "satis"),
+            ("Düzeltilecekler", "duzeltilecekler"),
         ]
 
         # İlk sekme hemen oluşturulur; gerisi lazy placeholder frame içinde.
@@ -88,6 +89,9 @@ class RaporlarModulu(tk.Frame):
         elif tab_key == "satis":
             from .satis_raporu_view import SatisRaporuView
             return SatisRaporuView(parent, self.main_app)
+        elif tab_key == "duzeltilecekler":
+            from .duzeltilecekler_view import DuzeltileceklerView
+            return DuzeltileceklerView(parent, self.main_app)
         return None
 
     def yenile(self):

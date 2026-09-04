@@ -53,7 +53,10 @@ def _export_to_pdf(df, file_path, title):
         return
 
     try:
-        doc = SimpleDocTemplate(file_path, pagesize=A4, rightMargin=30, leftMargin=30, topMargin=30, bottomMargin=30)
+        # Çok sütunlu raporlar yatay (landscape) A4'e sığar; az sütunda portre kalır.
+        landscape_mode = len(df.columns) > 6
+        page = landscape(A4) if landscape_mode else A4
+        doc = SimpleDocTemplate(file_path, pagesize=page, rightMargin=30, leftMargin=30, topMargin=30, bottomMargin=30)
         styles = getSampleStyleSheet()
         
         # Mevcut stilleri eklemek yerine özelliklerini güncelle
@@ -86,9 +89,9 @@ def _export_to_pdf(df, file_path, title):
             for i, cell in enumerate(row):
                 col_widths[i] = max(col_widths[i], len(str(cell)))
         
-        # Genişlikleri A4'e sığacak şekilde oranla
+        # Genişlikleri sayfaya sığacak şekilde oranla
         total_width = sum(col_widths)
-        page_width = A4[0] - 60 # Kenar boşlukları
+        page_width = page[0] - 60 # Kenar boşlukları (seçilen orientasyonun genişliği)
         ratio = page_width / total_width if total_width > 0 else 1
         table._argW = [w * ratio * 0.95 for w in col_widths] # Biraz daha boşluk bırak
 
@@ -99,24 +102,44 @@ def _export_to_pdf(df, file_path, title):
     except Exception as e:
         messagebox.showerror("PDF Aktarma Hatası", f"Dosya oluşturulurken bir hata oluştu:\n{e}")
 
+# Tarih biçimli dizileri (yyyy-mm-dd, gg.aa.yyyy, gg/aa/yyyy ...) sayıya çevirmemek için.
+# Grup hane sayıları tarih (<3 hane) ile Türkçe para binlik gruplarını (=3 hane) ayırır.
+_DATE_RE = re.compile(r'^(\d{4}[-./]\d{1,2}[-./]\d{1,2}|\d{1,2}[-./]\d{1,2}[-./]\d{4})$')
+# Türkçe para/miktar biçimi: binlik grubu '.', ondalık ',' (ops.) -> 1.234,56 / 150,2 / 1.500
+_TR_AMOUNT_RE = re.compile(r'^\d{1,3}(\.\d{3})*(,\d+)?$')
+
 def _parse_numeric_value(value):
     """
-    Para formatındaki veya binlik ayraçlı sayıları float'a çevirmeye çalışır.
-    Başarısız olursa orijinal değeri döndürür.
+    Türkçe biçimli para/miktar metinlerini float'a çevirir ("1.234,56" -> 1234.56).
+    Tarihleri ve diğer metinleri olduğu gibi (bozulmadan) korur.
     """
     if isinstance(value, (int, float)):
         return value
     if isinstance(value, str):
+        s = value.strip()
+        if not s or _DATE_RE.match(s):
+            return value  # bos ya da tarih -> metin olarak kalsin
+        cleaned = s.replace(" TL", "").strip()
+        if _TR_AMOUNT_RE.match(cleaned) and ('.' in cleaned or ',' in cleaned):
+            cleaned = cleaned.replace('.', '').replace(',', '.')
         try:
-            # "1.234,56 TL" -> 1234.56
-            return float(value.replace(" TL", "").replace(".", "").replace(",", "."))
+            return float(cleaned)
         except (ValueError, TypeError):
-            return value # Sayıya çevrilemezse orijinal metni koru
+            return value  # sayıya çevrilemezse orijinal metni koru
     return value
 
 def export_treeview_data(tree, report_title, format_type):
     if not tree.get_children():
         messagebox.showwarning("Uyarı", "Aktarılacak veri bulunmuyor.", parent=tree)
+        return
+
+    # Hem Excel hem PDF pandas DataFrame'e dayanır; pandas yoksa 149. satırda
+    # AttributeError fırlatmak yerine net uyarı ver.
+    if not pd:
+        messagebox.showerror(
+            "Hata",
+            "Dışa aktarmak için 'pandas' kütüphanesi gereklidir.\n'pip install pandas openpyxl' ile kurun.",
+            parent=tree)
         return
 
     columns = [tree.heading(col)["text"] for col in tree["columns"] if tree.column(col, "width") > 0]
