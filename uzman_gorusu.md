@@ -28,7 +28,7 @@ Uygulamanın **mimari omurgası sağlam**: tek merkezi fiş servisi, tutarlı fi
 - Kayıtta satırlar `self.satirlar`'dan olduğu gibi DB'ye gider (satır 743), KDV satırı ayrıca üretilir (748-760).
 - **Sonuç:** KDV'li bir faturayı açıp hiç değiştirmeden kaydetmek stok/masraf satırını brütleştirir → fiş bir KDV tutarı kadar dengesizleşir, maliyet raporları KDV kadar şişer. `fis_guncelle` satırları sil-yeniden-yazdığı için (`core/services.py:111`) bozulma **kalıcı**; ikinci düzenlemede katlanabilir.
 - **Tüm rapordaki en tehlikeli bulgu.**
-- **Düzeltme (2026-09-03):** `fatura_form.py:884` edit-yükleme artık `ara_toplam` (net) kullanıyor — oluşturma ile aynı semantik. DB taraması: cari karşılıklı 270 faturadan yalnızca test fişi id=7525 etkilenmişti; **geçmiş veri hasarı yok**. (id=7525 hâlâ bozuk — silinecek test fişi ya da tek UPDATE ile düzeltilir.)
+- **Düzeltme (2026-09-03):** `fatura_form.py:884` edit-yükleme artık `ara_toplam` (net) kullanıyor — oluşturma ile aynı semantik. DB taraması: cari karşılıklı 270 faturadan yalnızca test fişi id=7525 etkilenmişti; **geçmiş veri hasarı yok**. (7525 sonradan temizlendi — 05.09 taraması: dengesiz fiş 0.)
 
 ### K2. ✅ Borç = Alacak kontrolü veri katmanında hiç yok
 - **Konum:** `core/services.py:29` (`fis_kaydet`) ve `:89` (`fis_guncelle`)
@@ -286,7 +286,7 @@ Uygulamanın **mimari omurgası sağlam**: tek merkezi fiş servisi, tutarlı fi
 ### K1 — Fatura edit-load brüt→net ✅
 - **Dosya:** `modules/fatura/fatura_form.py:884` (edit-yükleme satır tutarı `toplam_tutar` → `ara_toplam`).
 - **Ne:** KDV'li faturayı açıp kaydetmenin satırı KDV kadar şişirmesi (sessiz veri yozlaşması) durduruldu; oluşturma ile edit aynı semantik (satır NET, KDV ayrı satır).
-- **Doğrulama:** canlı DB taraması — cari-karşılıklı 347 faturadan yalnız id=7525 (bugünkü test fişi) bozuk; geçmiş veri hasarı yok. (7525 hâlâ DB'de — kullanıcı onayıyla silinecek/düzelecek.)
+- **Doğrulama:** canlı DB taraması — cari-karşılıklı 347 faturadan yalnız id=7525 (bugünkü test fişi) bozuk; geçmiş veri hasarı yok. (7525 05.09'da DB'de artık yok; son tarama temiz.)
 
 ### K2 — Veri katmanı borç=alacak assert'i ✅
 - **Dosya:** `core/services.py` — yeni `_denge_kontrolu` (satır 29); `fis_kaydet` (53) ve `fis_guncelle` (115) yazımdan **önce** çağrıyor.
@@ -360,5 +360,5 @@ Uygulamanın **mimari omurgası sağlam**: tek merkezi fiş servisi, tutarlı fi
 - **Bu turda BİLEREK yapılmayanlar:** form-level Return/Esc (LookupDialog çakışması — U3 notu); `import_preview.py` 5 kopya diyalog birleştirmesi; `FisListeMixin` (plan.md backlog'da duruyor); `firmalar`/schema FK-CHECK dönüşümü (veri migration'ı gerektirir).
 
 ### Hâlâ açık (kullanıcıya kalmış)
-- id=7525 bozuk test fişi DB'de dokunulmadan duruyor (sil/düzelt kararı bekliyor).
+- ~~id=7525 bozuk test fişi~~ **KAPANDI (05.09.2026):** fiş DB'de artık yok (kullanıcı temizlemiş); genel tarama — tolerans üstü dengesiz Cari'li fiş **0**, geçmiş veri hasarı tamamen temiz.
 
